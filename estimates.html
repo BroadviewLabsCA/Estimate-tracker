@@ -1,0 +1,1438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Estimate Tracker — BVL</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --navy: #0f172a; --navy-mid: #1e2d4a; --navy-light: #1e3a5f;
+    --accent: #2563eb; --accent-light: #60a5fa;
+    --white: #ffffff;
+    --grey-50: #f8fafc; --grey-100: #f1f5f9; --grey-200: #e5e7eb;
+    --grey-300: #d1d5db; --grey-400: #9ca3af; --grey-500: #6b7280;
+    --grey-600: #4b5563; --grey-700: #374151; --grey-800: #111827;
+    --green: #16a34a; --green-bg: #f0fdf4; --green-border: #bbf7d0;
+    --amber: #d97706; --amber-bg: #fffbeb; --amber-border: #fde68a;
+    --red: #dc2626; --red-bg: #fef2f2; --red-border: #fecaca;
+    --blue: #2563eb; --blue-bg: #eff6ff; --blue-border: #bfdbfe;
+    --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+    --shadow-lg: 0 20px 40px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.06);
+    --radius: 6px; --radius-md: 10px; --radius-lg: 14px;
+
+    /* Stage colours — 7 linear + blocked */
+    --est-client-req-bg: #fefce8;    --est-client-req-fg: #854d0e;
+    --est-cs-brief-bg:   #eff6ff;    --est-cs-brief-fg:   #1d4ed8;
+    --est-pm-scope-bg:   #fffbeb;    --est-pm-scope-fg:   #d97706;
+    --est-cs-review-bg:  #ccfbf1;    --est-cs-review-fg:  #0f766e;
+    --est-pm-revs-bg:    #fff7ed;    --est-pm-revs-fg:    #c2410c;
+    --est-cs-sent-bg:    #f0fdf4;    --est-cs-sent-fg:    #166534;
+    --est-client-review-bg: #eef2ff; --est-client-review-fg: #4338ca;
+    --est-blocked-bg:    #fef2f2;    --est-blocked-fg:    #b91c1c;
+  }
+
+  body { font-family: var(--font); font-size: 14px; color: var(--grey-800); background: #f4f6f9; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+
+  /* ── PASSWORD GATE ── */
+  #pw-gate {
+    position: fixed; inset: 0; background: #f4f6f9;
+    display: flex; align-items: center; justify-content: center; z-index: 9999;
+  }
+  #pw-gate-inner { display: flex; flex-direction: column; gap: 10px; width: 260px; }
+  #pw-input {
+    width: 100%; padding: 9px 12px; font-size: 14px; font-family: var(--font);
+    border: 1px solid var(--grey-300); border-radius: var(--radius);
+    outline: none; background: var(--white); color: var(--grey-800);
+    transition: border-color 0.15s;
+  }
+  #pw-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.08); }
+  #pw-submit {
+    width: 100%; padding: 9px 12px; background: var(--navy); color: var(--white);
+    border: none; border-radius: var(--radius); font-size: 14px; font-weight: 600;
+    cursor: pointer; font-family: var(--font); transition: background 0.12s;
+  }
+  #pw-submit:hover { background: #1e2d4a; }
+
+  /* ── TOPBAR ── */
+  #topbar {
+    background: linear-gradient(135deg, #0f172a 0%, #1a2744 100%);
+    color: var(--white); height: 54px;
+    display: flex; align-items: center; padding: 0 24px; gap: 20px;
+    position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05), 0 4px 24px rgba(0,0,0,0.3);
+  }
+  .topbar-logo {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 15px; font-weight: 700; letter-spacing: -0.4px;
+  }
+  .topbar-logo-mark {
+    width: 26px; height: 26px; background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 7px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+  #save-indicator { font-size: 11px; color: rgba(255,255,255,0.32); transition: color 0.3s; }
+  #save-indicator.saved { color: #4ade80; }
+  #today-date { font-size: 11.5px; color: rgba(255,255,255,0.38); }
+  #signout-btn {
+    background: none; border: 1px solid rgba(255,255,255,0.15); border-radius: var(--radius);
+    color: rgba(255,255,255,0.5); font-size: 11.5px; padding: 3px 10px;
+    cursor: pointer; font-family: var(--font); transition: all 0.12s;
+  }
+  #signout-btn:hover { color: rgba(255,255,255,0.8); border-color: rgba(255,255,255,0.3); }
+
+  /* ── MAIN CONTENT ── */
+  #app { display: none; }
+  #main-content { padding: 24px 28px; max-width: 1440px; margin: 0 auto; }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--white); border: 1px solid var(--grey-200);
+    border-radius: var(--radius-md); box-shadow: var(--shadow);
+  }
+  .section { margin-bottom: 28px; }
+
+  /* ── BUTTONS ── */
+  .btn { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font); font-size: 13px; font-weight: 500; border-radius: var(--radius); border: none; cursor: pointer; transition: all 0.12s; padding: 6px 14px; white-space: nowrap; }
+  .btn-primary { background: var(--accent); color: var(--white); }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-secondary { background: var(--white); color: var(--grey-700); border: 1px solid var(--grey-200); }
+  .btn-secondary:hover { background: var(--grey-50); }
+  .btn-ghost { background: none; color: var(--grey-600); border: 1px solid transparent; }
+  .btn-ghost:hover { background: var(--grey-100); border-color: var(--grey-200); }
+  .btn-sm { font-size: 12px; padding: 4px 10px; }
+
+  /* ── BADGES ── */
+  .badge { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; font-size: 11px; font-weight: 600; border-radius: 4px; white-space: nowrap; }
+  .badge-red { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+
+  /* ── AVATARS ── */
+  .av { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: 700; color: var(--white); flex-shrink: 0; }
+  .av-blue   { background: #2563eb; } .av-orange { background: #ea580c; }
+  .av-teal   { background: #0d9488; } .av-rose   { background: #e11d48; }
+  .av-violet { background: #7c3aed; } .av-pink   { background: #be185d; }
+  .av-emerald{ background: #059669; } .av-sky    { background: #0284c7; }
+  .av-amber  { background: #b45309; } .av-cyan   { background: #0891b2; }
+  .av-indigo { background: #4f46e5; } .av-lime   { background: #65a30d; }
+  .av-slate  { background: #475569; } .av-stone  { background: #78716c; }
+
+  /* ── ESTIMATE TRACKER ── */
+  .est-filter-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; margin-bottom: 10px; flex-wrap: wrap; }
+  .est-seg { display: flex; border: 1px solid var(--grey-200); border-radius: 6px; overflow: hidden; }
+  .est-seg button { background: none; border: none; border-right: 1px solid var(--grey-200); padding: 4px 12px; font-size: 12px; font-family: var(--font); cursor: pointer; color: var(--grey-600); white-space: nowrap; }
+  .est-seg button:last-child { border-right: none; }
+  .est-seg button.active { background: var(--grey-800); color: #fff; font-weight: 600; }
+  .est-seg button:hover:not(.active) { background: var(--grey-50); }
+
+  .est-strip-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 16px; margin-bottom: 14px; }
+  @media (max-width: 900px) { .est-strip-grid { grid-template-columns: 1fr; } }
+  .est-strip-hd { display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--grey-100); }
+  .est-strip-name { font-weight: 600; font-size: 13px; }
+  .est-strip-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--grey-100); cursor: pointer; }
+  .est-strip-row:last-child { border-bottom: none; }
+  .est-strip-row:hover { background: var(--grey-50); }
+
+  /* Stage badges */
+  .est-stage-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; font-size: 11.5px; font-weight: 500; border-radius: 4px; white-space: nowrap; }
+  .est-s-client-req    { background: var(--est-client-req-bg);    color: var(--est-client-req-fg); }
+  .est-s-cs-brief      { background: var(--est-cs-brief-bg);      color: var(--est-cs-brief-fg); }
+  .est-s-pm-scope      { background: var(--est-pm-scope-bg);      color: var(--est-pm-scope-fg); }
+  .est-s-cs-review     { background: var(--est-cs-review-bg);     color: var(--est-cs-review-fg); }
+  .est-s-pm-revs       { background: var(--est-pm-revs-bg);       color: var(--est-pm-revs-fg); }
+  .est-s-cs-sent       { background: var(--est-cs-sent-bg);       color: var(--est-cs-sent-fg); }
+  .est-s-client-review { background: var(--est-client-review-bg); color: var(--est-client-review-fg); }
+  .est-s-blocked       { background: var(--est-blocked-bg);       color: var(--est-blocked-fg); font-weight: 700; }
+
+  /* Table */
+  .est-tbl { width: 100%; border-collapse: collapse; }
+  .est-tbl th { padding: 7px 12px; font-size: 9.5px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--grey-300); background: var(--grey-50); border-bottom: 1px solid var(--grey-200); white-space: nowrap; }
+  .est-tbl td { padding: 11px 12px; border-bottom: 1px solid var(--grey-100); vertical-align: middle; font-size: 13px; }
+  .est-tbl tbody tr:last-child td { border-bottom: none; }
+  .est-tbl tbody tr:hover td { background: #f8faff; }
+  .est-tbl tr.est-row-urgent td  { background: #fff8f8; }
+  .est-tbl tr.est-row-open td   { background: #f0f6ff; }
+  .est-tbl tr.est-row-done td   { opacity: 0.45; }
+  .est-tbl tr.est-row-blocked td { background: #fff5f5; }
+  .est-tbl tr.est-row-stuck > td:first-child { border-left: 3px solid #dc2626; }
+
+  /* Drawer */
+  .est-drawer-scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.18); z-index: 199; display: none; }
+  .est-drawer-scrim.open { display: block; }
+  .est-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 480px; background: var(--white); border-left: 1px solid var(--grey-200); z-index: 200; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); transform: translateX(100%); transition: transform 0.18s ease; }
+  .est-drawer.open { transform: translateX(0); }
+  .est-drawer-hd { padding: 14px 18px; border-bottom: 1px solid var(--grey-100); flex-shrink: 0; }
+  .est-drawer-action { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--grey-100); background: var(--grey-50); flex-shrink: 0; }
+  .est-drawer-block { padding: 12px 18px; border-bottom: 1px solid var(--grey-100); }
+
+  /* Modal */
+  .est-modal-scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 300; display: none; }
+  .est-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 480px; max-width: 95vw; background: var(--white); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); z-index: 301; padding: 20px 24px; display: none; max-height: 90vh; overflow-y: auto; }
+  .est-modal-input { width: 100%; border: 1px solid var(--grey-200); border-radius: 5px; padding: 6px 9px; font-size: 13px; font-family: var(--font); outline: none; color: var(--grey-800); }
+  .est-modal-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.08); }
+
+  /* Inline edit cells */
+  .est-ced { cursor: pointer; border-radius: 5px; transition: background 0.1s; }
+  .est-ced:hover { background: var(--grey-50); }
+  .est-ced input, .est-ced select { width: 100%; font-size: 12px; border: 1px solid var(--accent); border-radius: 4px; padding: 3px 6px; outline: none; font-family: var(--font); background: var(--white); }
+
+  /* Move-to dropdown */
+  .est-move-to-wrap { display: flex; flex-direction: column; gap: 2px; align-items: flex-end; }
+  .est-move-to-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--grey-400); }
+  .est-move-to-select {
+    font-size: 11.5px; border: 1px solid var(--grey-200); border-radius: 5px;
+    padding: 4px 8px; background: var(--white); color: var(--grey-600);
+    font-family: var(--font); cursor: pointer; min-width: 150px;
+  }
+  .est-move-to-select:focus { border-color: var(--accent); outline: none; }
+</style>
+</head>
+<body>
+
+<!-- ── PASSWORD GATE ── -->
+<div id="pw-gate">
+  <div id="pw-gate-inner">
+    <input type="password" id="pw-input" placeholder="Password"
+      onkeydown="if(event.key==='Enter')submitPassword()" autofocus>
+    <button id="pw-submit" onclick="submitPassword()">Submit</button>
+  </div>
+</div>
+
+<!-- ── MAIN APP (shown after auth) ── -->
+<div id="app">
+
+  <div id="topbar">
+    <div class="topbar-logo">
+      <div class="topbar-logo-mark">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <polygon points="7,1 8.1,5.8 7,7 5.9,5.8" fill="white"/>
+          <polygon points="13,7 8.2,8.1 7,7 8.2,5.9" fill="rgba(255,255,255,0.45)"/>
+          <polygon points="7,13 5.9,8.2 7,7 8.1,8.2" fill="rgba(255,255,255,0.65)"/>
+          <polygon points="1,7 5.8,5.9 7,7 5.8,8.1" fill="rgba(255,255,255,0.45)"/>
+        </svg>
+      </div>
+      Estimate Tracker
+    </div>
+    <div class="topbar-right">
+      <span id="save-indicator"></span>
+      <span id="today-date"></span>
+      <button id="signout-btn" onclick="doLogout()">Sign out</button>
+    </div>
+  </div>
+
+  <div id="main-content">
+    <div id="est-status-bar"></div>
+    <div id="est-standup-strip"></div>
+    <div id="est-escalation-bar"></div>
+    <div id="est-filter-bar"></div>
+    <div class="card" id="est-table-wrap"></div>
+    <div id="est-legend"></div>
+  </div>
+
+</div>
+
+<!-- Drawer + Modal (outside app div so they layer above everything) -->
+<div id="est-drawer-scrim" class="est-drawer-scrim" onclick="closeEstDrawer()"></div>
+<div id="est-drawer" class="est-drawer"></div>
+<div id="est-modal-scrim" class="est-modal-scrim" onclick="closeEstModal()"></div>
+<div id="est-modal" class="est-modal"></div>
+
+<script>
+// ─────────────────────────────────────────────
+// AUTH
+// ─────────────────────────────────────────────
+const PASSWORD = 'compass2026';
+const AUTH_KEY  = 'bvl-est-auth';
+
+function checkAuth() {
+  if (localStorage.getItem(AUTH_KEY) === btoa(PASSWORD)) {
+    document.getElementById('pw-gate').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    init();
+  }
+}
+function submitPassword() {
+  const inp = document.getElementById('pw-input');
+  if (inp.value === PASSWORD) {
+    localStorage.setItem(AUTH_KEY, btoa(PASSWORD));
+    document.getElementById('pw-gate').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    init();
+  } else {
+    inp.value = '';
+    inp.style.borderColor = '#dc2626';
+    inp.placeholder = 'Incorrect — try again';
+    setTimeout(() => { inp.style.borderColor = ''; inp.placeholder = 'Password'; inp.focus(); }, 1600);
+  }
+}
+function doLogout() {
+  localStorage.removeItem(AUTH_KEY);
+  location.reload();
+}
+
+// ─────────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────────
+const STORAGE_KEY    = 'bvl-est-v1';
+const CS_MEMBERS     = ['Bailey','Tyler','Katie'];
+const PM_MEMBERS     = ['Maria','Natacha W.','Michael','Celane'];
+const PRC_MEMBERS    = ['Judith'];
+const TEAMS_EST_CHANNEL = 'https://teams.microsoft.com/l/channel/19%3A5279922368e74f288be78a25c4eafcaa%40thread.tacv2/Briefs%20-%20Timelines%20-%20Estimates%20(Internal)?groupId=a96096f4-142d-4824-8578-58911067f5f7&tenantId=3a575746-9c5e-4a5b-8fff-ce3d4299df60&ngc=true';
+
+const EST_STAGES = [
+  { key:'client-req',    label:'Client New Job Request', short:'New Request',   roleCat:'CS', action:'Start CS brief'       },
+  { key:'cs-brief',      label:'CS Brief for Scoping',   short:'CS Brief',      roleCat:'CS', action:'Send to PM scoping'   },
+  { key:'pm-scope',      label:'PM Scoping',             short:'PM Scoping',    roleCat:'PM', action:'Send for CS review'   },
+  { key:'cs-review',     label:'CS Estimate Review',     short:'CS Review',     roleCat:'CS', action:'Request PM revisions' },
+  { key:'pm-revs',       label:'PM Revs Required',       short:'PM Revs',       roleCat:'PM', action:'Send to client'       },
+  { key:'cs-sent',       label:'CS Estimate Sent',       short:'CS Sent',       roleCat:'CS', action:'Mark with client'     },
+  { key:'client-review', label:'Client Estimate Review', short:'Client Review', roleCat:'CS', action:'Mark complete'        },
+  { key:'blocked',       label:'Blocked',                short:'Blocked',       roleCat:null, action:'Unblock'              },
+];
+const EST_LINEAR_STAGES = EST_STAGES.filter(s => s.key !== 'blocked');
+
+const EST_SLA = {
+  standard: { totalHrs: 72,  threshHrs: { 'client-req':4, 'cs-brief':8,  'pm-scope':16, 'cs-review':6,  'pm-revs':8,  'cs-sent':4, 'client-review':48, 'blocked':0 } },
+  complex:  { totalHrs: 168, threshHrs: { 'client-req':8, 'cs-brief':12, 'pm-scope':48, 'cs-review':16, 'pm-revs':24, 'cs-sent':8, 'client-review':72, 'blocked':0 } },
+};
+
+const EST_BRANDS = ['Xifaxan','Relistor','Wellbutrin','OraPharma','Cabtreo','Salesforce Excellence','Marketing Ops','Siliq','Jublia','Solta','Arestin'];
+const TEAM = {
+  'Bailey':    { initials:'B',  cls:'av-blue'   }, 'Tyler':     { initials:'TL', cls:'av-orange' },
+  'Maria':     { initials:'MC', cls:'av-teal'   }, 'Natacha W.':{ initials:'NW', cls:'av-rose'   },
+  'Kristin':   { initials:'KR', cls:'av-violet' }, 'Judith':    { initials:'JH', cls:'av-emerald'},
+  'Michael':   { initials:'MH', cls:'av-sky'    }, 'Katie':     { initials:'KT', cls:'av-amber'  },
+  'Neil':      { initials:'NR', cls:'av-cyan'   }, 'Celane':    { initials:'CL', cls:'av-lime'   },
+};
+
+// ─────────────────────────────────────────────
+// SEED ESTIMATES  (realistic BVL jobs)
+// ─────────────────────────────────────────────
+const SEED_ESTIMATES = [
+  { id:'EST-A01', job:'Relistor DTC Leave Behind — Q3 Print Refresh', brand:'Relistor', jobType:'Print', clientContact:'Christina Chiu', estimateType:'estimate', estimateComplexity:'standard', csOwner:'Bailey', pmOwner:'Maria', owner:'Maria', stage:'pm-scope', received:'2026-05-28', dueBack:'2026-06-02', target:'2026-05-31', rush:false, urgent:false, notes:'Confirm bleed and trim specs with press before finalising budget.', teamsLink:'', docUrl:'', source:'sharepoint', done:false, createdAt:'2026-05-28T09:00:00.000Z', stageHistory:[{type:'stage',stage:'client-req',who:'Bailey',when:'2026-05-28T09:00:00.000Z',note:'CS brief received'},{type:'stage',stage:'cs-brief',who:'Bailey',when:'2026-05-28T10:30:00.000Z'},{type:'stage',stage:'pm-scope',who:'Maria',when:'2026-05-29T09:00:00.000Z'}] },
+  { id:'EST-A02', job:'Siliq REMS ISI Update — Digital Banner Ads ×4', brand:'Siliq', jobType:'Digital — Banners', clientContact:'Sarah B.', estimateType:'estimate', estimateComplexity:'standard', csOwner:'Tyler', pmOwner:'Natacha W.', owner:'Tyler', stage:'cs-review', received:'2026-05-26', dueBack:'2026-05-30', target:'2026-05-28', rush:false, urgent:true, notes:'REMS ISI copy change only — scope against delta, not full redesign.', teamsLink:'', docUrl:'', source:'sharepoint', done:false, createdAt:'2026-05-26T08:00:00.000Z', stageHistory:[{type:'stage',stage:'client-req',who:'Tyler',when:'2026-05-26T08:00:00.000Z',note:'CS brief received'},{type:'stage',stage:'cs-brief',who:'Tyler',when:'2026-05-26T10:00:00.000Z'},{type:'stage',stage:'pm-scope',who:'Natacha W.',when:'2026-05-27T09:00:00.000Z'},{type:'stage',stage:'cs-review',who:'Tyler',when:'2026-05-27T14:00:00.000Z'}] },
+  { id:'EST-A03', job:'Cabtreo Access Program Print Kit — Full Refresh', brand:'Cabtreo', jobType:'Print', clientContact:'Diane Stone', estimateType:'estimate', estimateComplexity:'complex', csOwner:'Tyler', pmOwner:'Michael', owner:'Tyler', stage:'cs-sent', received:'2026-05-20', dueBack:'2026-05-29', target:'2026-05-27', rush:false, urgent:false, notes:'', teamsLink:'', docUrl:'', source:'sharepoint', done:false, createdAt:'2026-05-20T09:00:00.000Z', stageHistory:[{type:'stage',stage:'client-req',who:'Tyler',when:'2026-05-20T09:00:00.000Z',note:'CS brief received'},{type:'stage',stage:'cs-brief',who:'Tyler',when:'2026-05-20T11:00:00.000Z'},{type:'stage',stage:'pm-scope',who:'Michael',when:'2026-05-21T09:00:00.000Z'},{type:'stage',stage:'cs-review',who:'Tyler',when:'2026-05-23T09:00:00.000Z'},{type:'stage',stage:'pm-revs',who:'Michael',when:'2026-05-24T09:00:00.000Z',note:'CS requested PRC scope clarification'},{type:'stage',stage:'cs-sent',who:'Tyler',when:'2026-05-26T13:00:00.000Z'}] },
+  { id:'EST-A04', job:'Arestin Flipchart — Interactive PDF Module 3 Add', brand:'Arestin', jobType:'Digital — PDF', clientContact:'Jaclyn H.', estimateType:'estimate', estimateComplexity:'standard', csOwner:'Bailey', pmOwner:'Maria', owner:'Bailey', stage:'client-review', received:'2026-05-15', dueBack:'2026-05-21', target:'2026-05-19', rush:false, urgent:false, notes:'Design + layout only, no dev. Add module 3 to existing doc.', teamsLink:'', docUrl:'', source:'sharepoint', done:false, createdAt:'2026-05-15T09:00:00.000Z', stageHistory:[{type:'stage',stage:'client-req',who:'Bailey',when:'2026-05-15T09:00:00.000Z',note:'CS brief received'},{type:'stage',stage:'cs-brief',who:'Bailey',when:'2026-05-15T11:00:00.000Z'},{type:'stage',stage:'pm-scope',who:'Maria',when:'2026-05-16T09:00:00.000Z'},{type:'stage',stage:'cs-review',who:'Bailey',when:'2026-05-17T09:00:00.000Z'},{type:'stage',stage:'cs-sent',who:'Bailey',when:'2026-05-19T10:00:00.000Z'},{type:'stage',stage:'client-review',who:'Bailey',when:'2026-05-19T14:00:00.000Z'}] },
+  { id:'EST-A05', job:'Xifaxan HCP Digital Ad Unit Refresh — Q2 CO', brand:'Xifaxan', jobType:'Digital — Display Ads', clientContact:'Maggie B.', estimateType:'changeorder', estimateComplexity:'standard', csOwner:'Katie', pmOwner:'Celane', owner:'Katie', stage:'cs-brief', received:'2026-06-02', dueBack:'2026-06-05', target:'2026-06-04', rush:true, urgent:false, notes:'Change order vs original — client requesting updated fair balance and rebalanced layouts.', teamsLink:'', docUrl:'', source:'sharepoint', done:false, createdAt:'2026-06-02T08:00:00.000Z', stageHistory:[{type:'stage',stage:'client-req',who:'Katie',when:'2026-06-02T08:00:00.000Z',note:'CS brief received'},{type:'stage',stage:'cs-brief',who:'Katie',when:'2026-06-02T09:30:00.000Z'}] },
+  { id:'EST-A06', job:'Solta Thermage FLX Leave Behind — Trade Show Kit', brand:'Solta', jobType:'Print', clientContact:'Lana', estimateType:'estimate', estimateComplexity:'standard', csOwner:'Tyler', pmOwner:'Natacha W.', owner:'Tyler', stage:'blocked', received:'2026-05-30', dueBack:'2026-06-06', target:'2026-06-03', rush:false, urgent:false, notes:'Blocked pending direction confirmation from Lana on scope. New estimate needed post scope call.', teamsLink:'', docUrl:'', source:'sharepoint', done:false, createdAt:'2026-05-30T09:00:00.000Z', stageHistory:[{type:'stage',stage:'client-req',who:'Tyler',when:'2026-05-30T09:00:00.000Z',note:'CS brief received'},{type:'stage',stage:'cs-brief',who:'Tyler',when:'2026-05-30T10:00:00.000Z'},{type:'stage',stage:'blocked',who:'Tyler',when:'2026-06-01T09:00:00.000Z',note:'Waiting on client direction — scope call TBD'}] },
+];
+
+// ─────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────
+let STATE;
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    STATE = raw ? JSON.parse(raw) : { estimates: SEED_ESTIMATES.map(e=>({...e})), estViewAs:'Maria', webhookUrl:'', escalationNotified:{} };
+    if (!STATE.estimates)          STATE.estimates          = [];
+    if (!STATE.estViewAs)          STATE.estViewAs          = 'Maria';
+    if (!STATE.webhookUrl)         STATE.webhookUrl         = '';
+    if (!STATE.escalationNotified) STATE.escalationNotified = {};
+    STATE.estimates.forEach(e => {
+      const legacyMap = { brief:'cs-brief', file:'cs-brief', scope:'pm-scope', csrev:'cs-review', sent:'cs-sent' };
+      if (legacyMap[e.stage]) e.stage = legacyMap[e.stage];
+      if (!e.stageHistory)    e.stageHistory    = [];
+      if (e.done      === undefined) e.done      = false;
+      if (e.urgent    === undefined) e.urgent    = false;
+      if (e.rush      === undefined) e.rush      = false;
+      if (!e.owner)           e.owner           = '';
+      if (!e.target)          e.target          = '';
+      if (!e.csOwner)         e.csOwner         = e.owner || '';
+      if (!e.pmOwner)         e.pmOwner         = '';
+      if (!e.estimateType)    e.estimateType    = 'estimate';
+      if (!e.estimateComplexity) e.estimateComplexity = 'standard';
+      if (!e.docUrl)          e.docUrl          = '';
+      if (!e.dueBack)         e.dueBack         = '';
+      if (!e.notes)           e.notes           = '';
+      if (!e.clientContact)   e.clientContact   = '';
+      if (!e.createdAt)       e.createdAt       = new Date().toISOString();
+    });
+  } catch(_) {
+    STATE = { estimates: SEED_ESTIMATES.map(e=>({...e})), estViewAs:'Maria', webhookUrl:'', escalationNotified:{} };
+  }
+}
+
+let _saveTimer;
+function save() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));
+    const ind = document.getElementById('save-indicator');
+    if (ind) { ind.textContent = '✓ Saved'; ind.classList.add('saved'); setTimeout(() => { ind.textContent = ''; ind.classList.remove('saved'); }, 1500); }
+  }, 300);
+}
+
+// ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtDM(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d)) return null;
+  return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`;
+}
+
+// ─────────────────────────────────────────────
+// STAGE / SLA HELPERS
+// ─────────────────────────────────────────────
+function estStageDef(key)  { return EST_STAGES.find(s => s.key === key) || EST_STAGES[0]; }
+function estNextStage(key) {
+  if (key === 'blocked') return null;
+  const i = EST_LINEAR_STAGES.findIndex(s => s.key === key);
+  return (i >= 0 && i < EST_LINEAR_STAGES.length - 1) ? EST_LINEAR_STAGES[i+1] : null;
+}
+function estRoleMembers(rc) { return rc === 'CS' ? CS_MEMBERS : rc === 'PM' ? PM_MEMBERS : PRC_MEMBERS; }
+function _estSLAExempt(e)  { return e.estimateType === 'changeorder' || e.estimateType === 'hrsonly'; }
+function estSLATier(e)     { return e.estimateComplexity === 'complex' ? EST_SLA.complex : EST_SLA.standard; }
+function estSLATotalHrs(e) { return estSLATier(e).totalHrs; }
+function estSLAThreshHrs(e){ return estSLATier(e).threshHrs[e.stage] ?? 4; }
+
+function estElapsedHrs(e) {
+  if (!e.received) return 0;
+  return Math.max(0, (new Date() - new Date(e.received + 'T00:00:00')) / 3600000);
+}
+function estElapsed(e) { return Math.floor(estElapsedHrs(e) / 24); }
+function estStageAgeHrs(e) {
+  const hist = [...(e.stageHistory||[])].reverse().find(h => h.stage === e.stage && (!h.type || h.type === 'stage'));
+  const since = hist ? hist.when : e.createdAt;
+  if (!since) return 0;
+  return Math.max(0, (new Date() - new Date(since)) / 3600000);
+}
+function estIsUrgent(e) {
+  if (e.done) return false;
+  if (e.rush || e.urgent) return true;
+  if (!_estSLAExempt(e) && e.target && new Date() > new Date(e.target + 'T23:59:59')) return true;
+  return false;
+}
+function estIsStuck(e) {
+  if (e.done || e.stage === 'blocked' || _estSLAExempt(e)) return false;
+  return estStageAgeHrs(e) >= estSLAThreshHrs(e);
+}
+function estIsPastDue(e) {
+  if (!e.target || e.done || _estSLAExempt(e)) return false;
+  return new Date() > new Date(e.target + 'T23:59:59');
+}
+function estElapsedAmber(e) {
+  if (_estSLAExempt(e) || e.stage === 'blocked') return false;
+  return estElapsedHrs(e) >= estSLATotalHrs(e) * 0.6;
+}
+function estFmtAge(e) {
+  const hrs = estStageAgeHrs(e);
+  if (hrs < 24) return Math.round(hrs) + 'h';
+  return Math.floor(hrs / 24) + 'd';
+}
+function estStageAgeDays(e) { return Math.floor(estStageAgeHrs(e) / 24); }
+
+function estStageBadge(k) {
+  const s = estStageDef(k);
+  return `<span class="est-stage-badge est-s-${s.key}">${s.short}</span>`;
+}
+function estComplexityBadge(e) {
+  const cx = e.estimateComplexity === 'complex';
+  return `<span style="display:inline-block;font-size:9.5px;font-weight:700;border-radius:3px;padding:0 5px;vertical-align:middle;letter-spacing:0.03em;${cx?'background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff':'background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0'}">${cx?'Complex':'Standard'}</span>`;
+}
+
+// ─────────────────────────────────────────────
+// STAGE MUTATIONS
+// ─────────────────────────────────────────────
+function advanceEstStage(id) {
+  const e = (STATE.estimates||[]).find(x => x.id === id); if (!e) return;
+  if (e.stage === 'blocked') return;
+  if (e.stage === 'client-review') { e.done = !e.done; save(); renderEstimateTracker(); return; }
+  const next = estNextStage(e.stage); if (!next) return;
+  e.stage = next.key;
+  if (next.roleCat === 'PM')      e.owner = (e.pmOwner && PM_MEMBERS.includes(e.pmOwner)) ? e.pmOwner : (PM_MEMBERS[0]||'');
+  else if (next.roleCat === 'CS') e.owner = (e.csOwner && CS_MEMBERS.includes(e.csOwner)) ? e.csOwner : (CS_MEMBERS[0]||'');
+  (e.stageHistory = e.stageHistory||[]).push({ type:'stage', stage:next.key, who:e.owner, when:new Date().toISOString() });
+  save(); renderEstimateTracker();
+  if (_estOpenId === id) { const upd = (STATE.estimates||[]).find(x => x.id===id); if (upd) renderEstDrawer(upd); }
+}
+
+function moveEstToStage(id, stageKey) {
+  const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
+  if (!stageKey || stageKey === e.stage) return;
+  const def = estStageDef(stageKey);
+  e.stage = stageKey;
+  if (stageKey !== 'blocked') {
+    if (def.roleCat === 'PM')      e.owner = (e.pmOwner && PM_MEMBERS.includes(e.pmOwner)) ? e.pmOwner : (PM_MEMBERS[0]||'');
+    else if (def.roleCat === 'CS') e.owner = (e.csOwner && CS_MEMBERS.includes(e.csOwner)) ? e.csOwner : (CS_MEMBERS[0]||'');
+  }
+  (e.stageHistory = e.stageHistory||[]).push({ type:'stage', stage:stageKey, who:e.owner||'', when:new Date().toISOString(), note:'Manual move' });
+  save(); renderEstimateTracker();
+  if (_estOpenId === id) { const upd = (STATE.estimates||[]).find(x => x.id===id); if (upd) renderEstDrawer(upd); }
+}
+
+function toggleEstUrgent(id) {
+  const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
+  e.urgent = !e.urgent; save(); renderEstimateTracker();
+  if (_estOpenId === id) { const upd = (STATE.estimates||[]).find(x => x.id===id); if (upd) renderEstDrawer(upd); }
+}
+function toggleEstRush(id) {
+  const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
+  e.rush = !e.rush; save(); renderEstimateTracker();
+  if (_estOpenId === id) { const upd = (STATE.estimates||[]).find(x => x.id===id); if (upd) renderEstDrawer(upd); }
+}
+
+// ─────────────────────────────────────────────
+// DRAWER
+// ─────────────────────────────────────────────
+let _estOpenId = null, _estFilter = 'mine', _estStageFilter = null,
+    _estCollapsedStages = new Set(), _estEditHistIdx = null;
+
+function openEstDrawer(id) {
+  _estOpenId = id;
+  const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
+  const dr = document.getElementById('est-drawer'), sc = document.getElementById('est-drawer-scrim');
+  if (dr) { renderEstDrawer(e); dr.classList.add('open'); }
+  if (sc) sc.classList.add('open');
+  renderEstTable();
+}
+function closeEstDrawer() {
+  _estOpenId = null; _estEditHistIdx = null;
+  document.getElementById('est-drawer')?.classList.remove('open');
+  document.getElementById('est-drawer-scrim')?.classList.remove('open');
+  renderEstTable();
+}
+
+function renderEstDrawer(e) {
+  const dr = document.getElementById('est-drawer'); if (!dr) return;
+  const urgent = estIsUrgent(e), stuck = estIsStuck(e), pastdue = estIsPastDue(e);
+  const isBlocked = e.stage === 'blocked';
+  const isLastLinear = e.stage === 'client-review';
+  const stage = estStageDef(e.stage), next = !isBlocked ? estNextStage(e.stage) : null;
+  const typeLabel = e.estimateType==='changeorder'?'Change order':e.estimateType==='hrsonly'?'Hrs tracking only':'Estimate';
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const fmtDt = iso => { if(!iso)return'—'; const d=new Date(iso); return`${d.getDate()} ${MONTHS[d.getMonth()]} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+  const ced = (field, display) => `<span class="est-ced" onclick="estEditCell(this,'${e.id}','${field}')" title="Click to edit">${display}</span>`;
+
+  // Primary action button
+  let primaryBtn = '';
+  if (isBlocked) {
+    primaryBtn = `<span style="font-size:12px;color:var(--grey-400);font-style:italic">Use Move to… to unblock</span>`;
+  } else if (next) {
+    primaryBtn = `<button class="btn btn-primary" onclick="advanceEstStage('${e.id}')" style="padding:8px 18px;font-size:12.5px;font-weight:700">Advance → ${escHtml(next.short)}</button>`;
+  } else {
+    primaryBtn = `<button class="btn btn-secondary" onclick="advanceEstStage('${e.id}')" style="padding:8px 18px;font-size:12.5px">${e.done?'Reopen':'Mark complete'}</button>`;
+  }
+
+  // Move to… dropdown (all 8 stages, current selected+disabled)
+  const moveToHtml = `<div class="est-move-to-wrap">
+    <div class="est-move-to-label">Move to…</div>
+    <select class="est-move-to-select" onchange="if(this.value!=='${e.stage}')moveEstToStage('${e.id}',this.value)">
+      ${EST_STAGES.map(s=>`<option value="${s.key}"${s.key===e.stage?' selected disabled':''}>${s.label}${s.key===e.stage?' ✓':''}</option>`).join('')}
+    </select>
+  </div>`;
+
+  dr.innerHTML = `
+  <div class="est-drawer-hd">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;color:var(--grey-500);margin-bottom:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          ${ced('brand',`<span>${escHtml(e.brand||'— brand')}</span>`)}
+          ${e.jobType?`<span style="color:var(--grey-300)">·</span>${ced('jobType',`<span>${escHtml(e.jobType)}</span>`)}`
+                    : ced('jobType','<span style="color:var(--grey-300)">+ job type</span>')}
+        </div>
+        ${ced('job',`<span style="font-size:17px;font-weight:700;color:var(--grey-900);display:block;line-height:1.3">${escHtml(e.job||'Untitled')}</span>`)}
+        <div style="margin-top:5px;font-size:10px;color:var(--grey-400);font-family:monospace">${escHtml(e.id||'')} · ${typeLabel}</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;margin-left:12px">
+        <div style="position:relative">
+          <button id="est-menu-btn-${e.id}" onclick="(function(){const m=document.getElementById('est-menu-${e.id}');m.style.display=m.style.display==='block'?'none':'block';setTimeout(()=>document.addEventListener('click',function h(){m.style.display='none';document.removeEventListener('click',h)},{once:true}),0)})()" style="background:none;border:1px solid var(--grey-200);border-radius:5px;cursor:pointer;padding:3px 7px;font-size:14px;color:var(--grey-500);line-height:1">⋯</button>
+          <div id="est-menu-${e.id}" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid var(--grey-200);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.1);min-width:160px;z-index:100;overflow:hidden">
+            <button onclick="toggleEstRush('${e.id}')" style="display:block;width:100%;text-align:left;padding:8px 13px;font-size:12.5px;border:none;background:none;cursor:pointer;color:${e.rush?'var(--grey-700)':'#dc2626'};font-weight:${e.rush?400:700}">${e.rush?'Remove Rush flag':'🔴 Mark as Rush'}</button>
+            <button onclick="toggleEstUrgent('${e.id}')" style="display:block;width:100%;text-align:left;padding:8px 13px;font-size:12.5px;border:none;background:none;cursor:pointer;color:var(--grey-700);border-top:1px solid var(--grey-100)">${urgent?'Remove urgent flag':'Flag as urgent'}</button>
+            <button onclick="if(confirm('Delete this estimate?')){deleteEstimate('${e.id}');closeEstDrawer();}" style="display:block;width:100%;text-align:left;padding:8px 13px;font-size:12.5px;border:none;background:none;cursor:pointer;color:var(--red);border-top:1px solid var(--grey-100)">Delete estimate</button>
+          </div>
+        </div>
+        <button onclick="closeEstDrawer()" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--grey-400);padding:0;line-height:1">✕</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+      ${estStageBadge(e.stage)}
+      ${e.rush?`<span style="font-size:10.5px;font-weight:800;background:#dc2626;color:#fff;border-radius:3px;padding:1px 7px;letter-spacing:0.04em;text-transform:uppercase">Rush</span>`:''}
+      ${urgent&&!e.rush?`<span class="badge badge-red" style="font-size:10.5px">⚠ Urgent</span>`:''}
+      ${stuck&&!pastdue?`<span style="font-size:10.5px;font-weight:600;background:#fff3cd;color:#92400e;border-radius:3px;padding:1px 6px">${estStageAgeDays(e)}d stuck</span>`:''}
+      ${pastdue?`<span style="font-size:10.5px;font-weight:600;background:#fee2e2;color:#b91c1c;border-radius:3px;padding:1px 6px">Past due</span>`:''}
+    </div>
+  </div>
+
+  <div class="est-drawer-action">
+    <div style="flex:1">
+      <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:0.06em;color:var(--grey-400);margin-bottom:3px">Next action</div>
+      <div style="font-size:14px;font-weight:700;color:var(--grey-900);margin-bottom:4px">${escHtml(stage.action)}</div>
+      <div style="font-size:11.5px;color:var(--grey-500)">Owner · <b style="color:var(--grey-700)">${escHtml(e.owner||'Unassigned')}</b></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;flex-shrink:0">
+      ${primaryBtn}
+      ${moveToHtml}
+    </div>
+  </div>
+
+  <div style="flex:1;overflow-y:auto">
+    <div style="background:#f8f9fa;border-radius:6px;margin:12px 16px 0;padding:10px 12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:9.5px;text-transform:uppercase;letter-spacing:0.07em;font-weight:700;color:var(--grey-400)">For the client</span>
+        <button id="est-copy-sentence-btn-${e.id}" onclick="copyEstClientSentence('${e.id}')" style="font-size:11px;background:none;border:1px solid var(--grey-200);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--grey-500)">Copy</button>
+      </div>
+      <div style="font-size:12.5px;color:var(--grey-700);line-height:1.5">${estClientSentence(e)}</div>
+    </div>
+
+    <div class="est-drawer-block" style="padding-top:16px">
+      <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:0.07em;font-weight:700;color:var(--grey-400);margin-bottom:12px">Details</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-size:12.5px;margin-bottom:14px">
+        <div style="padding:6px 0;border-bottom:1px solid var(--grey-100)">
+          <div style="font-size:9.5px;color:var(--grey-400);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.04em">Stage</div>
+          ${ced('stage',`<span style="font-weight:600;color:var(--grey-800)">${escHtml(stage.label)}</span>`)}
+        </div>
+        <div style="padding:6px 0 6px 12px;border-bottom:1px solid var(--grey-100)">
+          <div style="font-size:9.5px;color:var(--grey-400);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.04em">Complexity</div>
+          <select onchange="updateEstimateField('${e.id}','estimateComplexity',this.value);renderEstimateTracker();const upd=(STATE.estimates||[]).find(x=>x.id==='${e.id}');if(upd)renderEstDrawer(upd)" style="font-size:12.5px;border:none;padding:0;background:transparent;cursor:pointer;font-family:var(--font);color:${(e.estimateComplexity||'standard')==='complex'?'#7e22ce':'#15803d'};font-weight:700">
+            <option value="standard"${(e.estimateComplexity||'standard')==='standard'?' selected':''}>Standard · 72h</option>
+            <option value="complex"${e.estimateComplexity==='complex'?' selected':''}>Complex · 7d</option>
+          </select>
+        </div>
+        <div style="padding:6px 0;border-bottom:1px solid var(--grey-100)">
+          <div style="font-size:9.5px;color:var(--grey-400);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.04em">Target send</div>
+          ${ced('target',`<span style="font-weight:600;color:${pastdue?'var(--red)':'var(--grey-800)'}">${fmtDM(e.target)||'— set date'}</span>`)}
+        </div>
+        <div style="padding:6px 0 6px 12px;border-bottom:1px solid var(--grey-100)">
+          <div style="font-size:9.5px;color:var(--grey-400);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.04em">Client contact</div>
+          ${ced('clientContact',`<span style="font-weight:500">${escHtml(e.clientContact||'— add contact')}</span>`)}
+        </div>
+      </div>
+      <div style="padding:10px 12px;background:var(--grey-50);border-radius:6px;font-size:11.5px;display:grid;grid-template-columns:1fr 1fr;gap:0">
+        <div style="padding:4px 0;border-bottom:1px solid var(--grey-100)">
+          <div style="font-size:9px;color:var(--grey-300);margin-bottom:2px;text-transform:uppercase;letter-spacing:0.05em">CS Owner</div>
+          <select onchange="updateEstimateField('${e.id}','csOwner',this.value);const st=estStageDef((STATE.estimates||[]).find(x=>x.id==='${e.id}')?.stage||'');if(st.roleCat==='CS')updateEstimateField('${e.id}','owner',this.value);renderEstimateTracker();const upd=(STATE.estimates||[]).find(x=>x.id==='${e.id}');if(upd)renderEstDrawer(upd)" style="font-size:11.5px;border:none;padding:0;background:transparent;cursor:pointer;font-family:var(--font);color:var(--grey-600);width:100%">
+            <option value="">— unassigned —</option>
+            ${CS_MEMBERS.map(m=>`<option value="${escHtml(m)}"${e.csOwner===m?' selected':''}>${escHtml(m)}</option>`).join('')}
+          </select>
+        </div>
+        <div style="padding:4px 0 4px 10px;border-bottom:1px solid var(--grey-100)">
+          <div style="font-size:9px;color:var(--grey-300);margin-bottom:2px;text-transform:uppercase;letter-spacing:0.05em">PM Assigned</div>
+          <select onchange="updateEstimateField('${e.id}','pmOwner',this.value);const st2=estStageDef((STATE.estimates||[]).find(x=>x.id==='${e.id}')?.stage||'');if(st2.roleCat==='PM')updateEstimateField('${e.id}','owner',this.value);renderEstimateTracker();const upd=(STATE.estimates||[]).find(x=>x.id==='${e.id}');if(upd)renderEstDrawer(upd)" style="font-size:11.5px;border:none;padding:0;background:transparent;cursor:pointer;font-family:var(--font);color:var(--grey-600);width:100%">
+            <option value="">— unassigned —</option>
+            ${PM_MEMBERS.map(m=>`<option value="${escHtml(m)}"${e.pmOwner===m?' selected':''}>${escHtml(m)}</option>`).join('')}
+          </select>
+        </div>
+        <div style="padding:4px 0;border-bottom:1px solid var(--grey-100)">
+          <div style="font-size:9px;color:var(--grey-300);margin-bottom:2px;text-transform:uppercase;letter-spacing:0.05em">Brief date</div>
+          ${ced('received',`<span style="color:var(--grey-600)">${fmtDM(e.received)||'— set date'}</span>`)}
+        </div>
+        <div style="padding:4px 0 4px 10px;border-bottom:1px solid var(--grey-100)">
+          <div style="font-size:9px;color:var(--grey-300);margin-bottom:2px;text-transform:uppercase;letter-spacing:0.05em">Due back</div>
+          ${ced('dueBack',`<span style="color:var(--grey-600)">${fmtDM(e.dueBack)||'— set date'}</span>`)}
+        </div>
+        <div style="padding:4px 0">
+          <div style="font-size:9px;color:var(--grey-300);margin-bottom:2px;text-transform:uppercase;letter-spacing:0.05em">Type</div>
+          <select onchange="updateEstimateField('${e.id}','estimateType',this.value);renderEstimateTracker();const upd=(STATE.estimates||[]).find(x=>x.id==='${e.id}');if(upd)renderEstDrawer(upd)" style="font-size:11.5px;border:none;padding:0;background:transparent;cursor:pointer;font-family:var(--font);color:var(--grey-600)">
+            <option value="estimate"${(e.estimateType||'estimate')==='estimate'?' selected':''}>Estimate</option>
+            <option value="changeorder"${e.estimateType==='changeorder'?' selected':''}>Change order</option>
+            <option value="hrsonly"${e.estimateType==='hrsonly'?' selected':''}>Hrs incurred</option>
+          </select>
+        </div>
+        <div style="padding:4px 0 4px 10px">
+          <div style="font-size:9px;color:var(--grey-300);margin-bottom:2px;text-transform:uppercase;letter-spacing:0.05em">Elapsed in stage</div>
+          <span style="font-weight:${stuck||pastdue?600:400};color:${stuck||pastdue?'var(--red)':estStageAgeHrs(e)>=(estSLAThreshHrs(e)*0.6)?'var(--amber)':'var(--grey-600)'}">${estFmtAge(e)}</span>
+          <span style="color:var(--grey-300);font-size:10.5px"> / ${(()=>{const h=estSLAThreshHrs(e);return h===0?'—':h<24?h+'h':h/24+'d';})()}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="est-drawer-block" style="padding-top:14px">
+      <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:0.07em;font-weight:700;color:var(--grey-400);margin-bottom:8px">Links</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <a href="${TEAMS_EST_CHANNEL}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#6264a7;text-decoration:none">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Briefs &amp; Estimates channel</a>
+        <div style="display:flex;align-items:center;gap:6px">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--grey-400)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          ${e.docUrl
+            ?`<a href="${escHtml(e.docUrl)}" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Estimate doc ↗</a><button onclick="updateEstimateField('${e.id}','docUrl','');const upd=(STATE.estimates||[]).find(x=>x.id==='${e.id}');if(upd)renderEstDrawer(upd)" style="background:none;border:none;cursor:pointer;color:var(--grey-300);font-size:13px;padding:0;line-height:1" title="Remove">×</button>`
+            :`<input placeholder="Paste doc URL…" style="flex:1;font-size:11.5px;border:none;border-bottom:1px solid var(--grey-200);padding:2px 0;outline:none;font-family:var(--font);background:transparent;color:var(--grey-700)" onblur="if(this.value.trim()){updateEstimateField('${e.id}','docUrl',this.value.trim());const upd=(STATE.estimates||[]).find(x=>x.id==='${e.id}');if(upd)renderEstDrawer(upd);}">`}
+        </div>
+      </div>
+    </div>
+
+    <div class="est-drawer-block" style="padding-top:14px">
+      <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:0.07em;font-weight:700;color:var(--grey-400);margin-bottom:6px">Notes</div>
+      <textarea placeholder="Add context, instructions, or anything the PM needs to know…" style="width:100%;min-height:72px;font-size:12.5px;font-family:var(--font);border:1px solid #eee;border-radius:5px;padding:8px 10px;resize:vertical;outline:none;color:var(--grey-800);background:var(--white);box-sizing:border-box;line-height:1.5" onchange="updateEstimateField('${e.id}','notes',this.value)">${escHtml(e.notes||'')}</textarea>
+    </div>
+
+    <div class="est-drawer-block" style="border-bottom:none;padding-top:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:9.5px;text-transform:uppercase;letter-spacing:0.07em;font-weight:700;color:var(--grey-400)">Activity log</span>
+        <button onclick="addEstHistoryRow('${e.id}')" style="font-size:11px;background:none;border:none;cursor:pointer;color:var(--grey-400);padding:0;text-decoration:underline">+ Entry</button>
+      </div>
+      ${(e.stageHistory||[]).length
+        ? [...(e.stageHistory||[])].reverse().map((h,ri) => {
+            const hi = (e.stageHistory.length-1) - ri;
+            const isOwner = h.type === 'owner';
+            const isEditing = _estEditHistIdx === hi;
+            const fmtWhen = iso => { if(!iso)return'—'; const d=new Date(iso); return`${d.getDate()} ${MONTHS[d.getMonth()]} · ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+            if (isEditing) return `<div style="padding:8px;border:1px solid var(--accent);border-radius:6px;margin:4px 0;background:#f0f7ff;display:flex;flex-direction:column;gap:6px">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                <div><div style="font-size:10px;color:var(--grey-500);margin-bottom:2px">Stage</div>
+                  <select id="eh-stage-${hi}" style="font-size:11.5px;border:1px solid var(--grey-300);border-radius:4px;padding:3px 5px;width:100%;background:var(--white)">
+                    ${EST_STAGES.map(s=>`<option value="${s.key}"${h.stage===s.key?' selected':''}>${s.label}</option>`).join('')}
+                  </select></div>
+                <div><div style="font-size:10px;color:var(--grey-500);margin-bottom:2px">Who</div>
+                  <input id="eh-who-${hi}" value="${escHtml(h.who||'')}" style="font-size:11.5px;border:1px solid var(--grey-300);border-radius:4px;padding:3px 5px;width:100%;outline:none;box-sizing:border-box"></div>
+              </div>
+              <div><div style="font-size:10px;color:var(--grey-500);margin-bottom:2px">When</div>
+                <input id="eh-when-${hi}" type="datetime-local" value="${h.when?h.when.slice(0,16):''}" style="font-size:11.5px;border:1px solid var(--grey-300);border-radius:4px;padding:3px 5px;width:100%;outline:none;box-sizing:border-box"></div>
+              <div><div style="font-size:10px;color:var(--grey-500);margin-bottom:2px">Note (optional)</div>
+                <input id="eh-note-${hi}" value="${escHtml(h.note||'')}" style="font-size:11.5px;border:1px solid var(--grey-300);border-radius:4px;padding:3px 5px;width:100%;outline:none;box-sizing:border-box"></div>
+              <div style="display:flex;gap:6px;justify-content:flex-end">
+                <button onclick="_estEditHistIdx=null;const upd=(STATE.estimates||[]).find(x=>x.id==='${e.id}');if(upd)renderEstDrawer(upd)" style="background:none;border:1px solid var(--grey-200);border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11.5px;color:var(--grey-600)">Cancel</button>
+                <button onclick="saveEstHistoryRow('${e.id}',${hi})" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11.5px;font-weight:600">Save</button>
+              </div>
+            </div>`;
+            return `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--grey-100)">
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+                  ${isOwner
+                    ? `<span style="font-size:10px;background:#eff6ff;color:#1d4ed8;border-radius:3px;padding:0 4px;font-weight:600">Owner</span><span style="font-size:11.5px;color:var(--grey-600)">${escHtml(h.note||('→ '+(h.who||'?')))}</span>`
+                    : `${estStageBadge(h.stage)}<span style="font-size:11.5px;color:var(--grey-600)">${escHtml(h.who||'—')}</span>${h.note?`<span style="font-size:10px;color:var(--grey-400);font-style:italic">${escHtml(h.note)}</span>`:''}`}
+                </div>
+                <div style="font-size:10px;color:var(--grey-300);margin-top:1px">${fmtWhen(h.when)}</div>
+              </div>
+              <div style="display:flex;gap:8px;flex-shrink:0;align-items:center;padding-top:2px">
+                <button onclick="editEstHistoryRow('${e.id}',${hi})" style="background:none;border:none;cursor:pointer;font-size:10.5px;color:var(--grey-400);padding:0;text-decoration:underline">Edit</button>
+                <button onclick="deleteEstHistoryRow('${e.id}',${hi})" style="background:none;border:none;cursor:pointer;color:var(--grey-300);font-size:13px;padding:0;line-height:1" title="Remove">×</button>
+              </div>
+            </div>`;
+          }).join('')
+        : '<div style="color:var(--grey-300);font-size:11.5px;padding:4px 0;font-style:italic">No activity yet.</div>'}
+    </div>
+  </div>`;
+}
+
+// ─────────────────────────────────────────────
+// HISTORY ROW EDITING
+// ─────────────────────────────────────────────
+function addEstHistoryRow(id) {
+  const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
+  if (!e.stageHistory) e.stageHistory = [];
+  const who = STATE.estViewAs && STATE.estViewAs !== '__team__' ? STATE.estViewAs : '';
+  e.stageHistory.push({ type:'stage', stage:e.stage, who, when:new Date().toISOString() });
+  save(); renderEstDrawer(e);
+}
+function editEstHistoryRow(id, idx) {
+  _estEditHistIdx = idx;
+  const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
+  renderEstDrawer(e);
+  setTimeout(() => { const dr = document.getElementById('est-drawer'); if (dr) dr.scrollTop = dr.scrollHeight; }, 50);
+}
+function saveEstHistoryRow(id, idx) {
+  const e = (STATE.estimates||[]).find(x => x.id===id); if (!e || !e.stageHistory[idx]) return;
+  const h = e.stageHistory[idx];
+  const stEl = document.getElementById(`eh-stage-${idx}`);
+  const whEl = document.getElementById(`eh-who-${idx}`);
+  const wnEl = document.getElementById(`eh-when-${idx}`);
+  const ntEl = document.getElementById(`eh-note-${idx}`);
+  if (stEl) h.stage = stEl.value;
+  if (whEl) h.who   = whEl.value.trim();
+  if (wnEl && wnEl.value) h.when = wnEl.value + ':00.000Z';
+  if (ntEl) h.note  = ntEl.value.trim() || undefined;
+  _estEditHistIdx = null;
+  save(); renderEstDrawer(e);
+}
+function deleteEstHistoryRow(id, idx) {
+  const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
+  e.stageHistory.splice(idx, 1); save(); renderEstDrawer(e);
+}
+
+// ─────────────────────────────────────────────
+// FIELD MUTATIONS
+// ─────────────────────────────────────────────
+function updateEstimateField(id, field, value) {
+  const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
+  const prev = e[field];
+  if (prev === value) return;
+  e[field] = value;
+  const who = STATE.estViewAs && STATE.estViewAs !== '__team__' ? STATE.estViewAs : '';
+  const now = new Date().toISOString();
+  if (field === 'stage') {
+    (e.stageHistory = e.stageHistory||[]).push({ type:'stage', stage:value, who, when:now });
+  } else if (field === 'owner' && value) {
+    (e.stageHistory = e.stageHistory||[]).push({ type:'owner', stage:e.stage, who:value, when:now, note:`Owner → ${value}${prev?' (was '+prev+')':''}` });
+  }
+  save();
+}
+function deleteEstimate(id) {
+  STATE.estimates = (STATE.estimates||[]).filter(e => e.id !== id);
+  save(); renderEstimateTracker();
+}
+
+// ─────────────────────────────────────────────
+// INLINE CELL EDIT
+// ─────────────────────────────────────────────
+function estEditCell(el, id, field) {
+  if (el.querySelector('input,select')) return;
+  const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
+  const cur = e[field] || '';
+  let inp;
+  if (field === 'stage') {
+    inp = document.createElement('select');
+    inp.style.cssText = 'font-size:12px;border:1px solid var(--accent);border-radius:4px;padding:2px 5px;width:100%;background:var(--white);outline:none';
+    EST_STAGES.forEach(s => { const o = document.createElement('option'); o.value=s.key; o.textContent=s.label; if(s.key===cur) o.selected=true; inp.appendChild(o); });
+  } else if (field === 'owner') {
+    inp = document.createElement('select');
+    inp.style.cssText = 'font-size:12px;border:1px solid var(--accent);border-radius:4px;padding:2px 5px;width:100%;background:var(--white);outline:none';
+    const blank = document.createElement('option'); blank.value=''; blank.textContent='— Unassigned —'; inp.appendChild(blank);
+    [{label:'CS',arr:CS_MEMBERS},{label:'PM',arr:PM_MEMBERS}].forEach(({label,arr}) => { const og=document.createElement('optgroup'); og.label=label; arr.forEach(m => { const o=document.createElement('option'); o.value=m; o.textContent=m; if(m===cur)o.selected=true; og.appendChild(o); }); inp.appendChild(og); });
+  } else if (field === 'received' || field === 'target' || field === 'dueBack') {
+    inp = document.createElement('input'); inp.type='date'; inp.value=cur;
+    inp.style.cssText = 'font-size:12px;border:1px solid var(--accent);border-radius:4px;padding:2px 5px;width:100%;outline:none';
+  } else {
+    inp = document.createElement('input'); inp.type='text'; inp.value=cur;
+    inp.style.cssText = 'font-size:12px;border:1px solid var(--accent);border-radius:4px;padding:2px 5px;width:100%;outline:none';
+  }
+  el.innerHTML = ''; el.appendChild(inp);
+  if (field === 'brand') {
+    const dl = document.createElement('datalist'); dl.id='est-ced-brand-list';
+    EST_BRANDS.forEach(b => { const o=document.createElement('option'); o.value=b; dl.appendChild(o); });
+    inp.setAttribute('list','est-ced-brand-list'); el.appendChild(dl);
+  }
+  inp.focus();
+  const save_ = () => { updateEstimateField(id,field,inp.value); const upd=(STATE.estimates||[]).find(x=>x.id===id); if(upd){renderEstimateTracker();renderEstDrawer(upd);}};
+  inp.addEventListener('change', save_);
+  inp.addEventListener('blur',   save_);
+}
+
+// ─────────────────────────────────────────────
+// MODAL — NEW ESTIMATE
+// ─────────────────────────────────────────────
+function closeEstModal() {
+  document.getElementById('est-modal').style.display = 'none';
+  document.getElementById('est-modal-scrim').style.display = 'none';
+}
+function _estCalcTargetSend() {
+  const briefEl = document.getElementById('est-f-received');
+  const outEl   = document.getElementById('est-f-target-display');
+  if (!briefEl || !outEl) return;
+  if (!briefEl.value) { outEl.textContent='—'; return; }
+  const cx = document.querySelector('input[name="est-f-cx"]:checked')?.value || 'standard';
+  const addDays = cx === 'complex' ? 7 : 3;
+  const d = new Date(briefEl.value + 'T00:00:00'); d.setDate(d.getDate() + addDays);
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  outEl.textContent = `${d.getDate()} ${M[d.getMonth()]} ${d.getFullYear()} (+${addDays} calendar days)`;
+  outEl.dataset.iso = d.toISOString().slice(0,10);
+}
+function showEstModal() {
+  const modal = document.getElementById('est-modal'), scrim = document.getElementById('est-modal-scrim');
+  if (!modal) return;
+  const todayStr = new Date().toISOString().slice(0,10);
+  modal.style.display = 'block'; if (scrim) scrim.style.display = 'block';
+  const lbl   = t => `<label style="display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:0.05em;color:var(--grey-500);margin-bottom:5px">${t} <span style="color:var(--red)">*</span></label>`;
+  const smlbl = t => `<label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:var(--grey-400);margin-bottom:4px">${t}</label>`;
+  modal.innerHTML = `
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+    <div style="font-size:15px;font-weight:700;color:var(--grey-900)">New estimate</div>
+    <button onclick="closeEstModal()" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--grey-400);padding:0;line-height:1;flex-shrink:0;margin-left:10px">✕</button>
+  </div>
+  <div style="height:1px;background:var(--grey-100);margin:14px 0"></div>
+  <div style="display:grid;gap:16px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>${lbl('Brand')}
+        <input id="est-f-brand" class="est-modal-input" placeholder="Brand" list="est-brand-list" autocomplete="off">
+        <datalist id="est-brand-list">${EST_BRANDS.map(b=>`<option value="${escHtml(b)}">`).join('')}</datalist>
+      </div>
+      <div>${lbl('Client contact')}
+        <input id="est-f-contact" class="est-modal-input" placeholder="Contact name">
+      </div>
+    </div>
+    <div>${lbl('Project name')}
+      <input id="est-f-job" class="est-modal-input" placeholder="e.g. Relistor HCP Leave Behind — Q3 Refresh">
+    </div>
+    <div>${lbl('Job type')}
+      <input id="est-f-type" class="est-modal-input" placeholder="e.g. Print, Digital — Email, Video">
+    </div>
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--grey-400);margin-bottom:10px">Complexity</div>
+      <div style="display:flex;border:1px solid var(--grey-200);border-radius:5px;overflow:hidden;font-size:12px;width:fit-content">
+        <label id="est-cx-std-lbl" style="display:flex;align-items:center;gap:5px;padding:5px 11px;cursor:pointer;border-right:1px solid var(--grey-200);background:#f0fdf4">
+          <input type="radio" name="est-f-cx" value="standard" checked onchange="_estCalcTargetSend();document.getElementById('est-cx-std-lbl').style.background='#f0fdf4';document.getElementById('est-cx-cpx-lbl').style.background='#fff'">
+          <span style="font-weight:600;color:#15803d">Standard</span>
+        </label>
+        <label id="est-cx-cpx-lbl" style="display:flex;align-items:center;gap:5px;padding:5px 11px;cursor:pointer;background:#fff">
+          <input type="radio" name="est-f-cx" value="complex" onchange="_estCalcTargetSend();document.getElementById('est-cx-std-lbl').style.background='#fff';document.getElementById('est-cx-cpx-lbl').style.background='#fdf4ff'">
+          <span style="font-weight:600;color:#7e22ce">Complex</span>
+        </label>
+      </div>
+      <div style="margin-top:10px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="est-f-rush" style="width:14px;height:14px;accent-color:#dc2626;cursor:pointer;flex-shrink:0">
+          <span style="font-size:12.5px;font-weight:700;color:#dc2626">Rush</span>
+          <span style="font-size:11px;color:var(--grey-400)">— mark as urgent</span>
+        </label>
+      </div>
+    </div>
+    <div style="background:var(--grey-50);border:1px solid var(--grey-100);border-radius:8px;padding:12px 14px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--grey-400);margin-bottom:10px">Timeline</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">
+        <div>${lbl('Brief received')}
+          <input type="date" id="est-f-received" class="est-modal-input" value="${todayStr}" oninput="_estCalcTargetSend()">
+        </div>
+        <div>${lbl('Due back')}
+          <input type="date" id="est-f-dueback" class="est-modal-input">
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;padding-top:7px;border-top:1px solid var(--grey-100)">
+        <span style="font-size:10.5px;color:var(--grey-400)">Target send</span>
+        <span style="font-size:10.5px;color:var(--grey-300)">·</span>
+        <span id="est-f-target-display" style="font-size:11px;font-weight:600;color:var(--grey-600)">—</span>
+      </div>
+    </div>
+    <div style="background:var(--grey-50);border:1px solid var(--grey-100);border-radius:8px;padding:12px 14px">
+      <div style="font-size:10px;color:var(--grey-400);font-style:italic;margin-bottom:10px">Assign</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
+        <div>${smlbl('CS Owner')}
+          <select id="est-f-csowner" class="est-modal-input" style="font-size:12px">
+            <option value="">— Select CS —</option>
+            ${CS_MEMBERS.map(m=>`<option value="${escHtml(m)}"${STATE.estViewAs===m?' selected':''}>${escHtml(m)}</option>`).join('')}
+          </select>
+        </div>
+        <div>${smlbl('PM Assigned')}
+          <select id="est-f-pmowner" class="est-modal-input" style="font-size:12px">
+            <option value="">— Select PM —</option>
+            ${PM_MEMBERS.map(m=>`<option value="${escHtml(m)}">${escHtml(m)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:var(--grey-400);margin-bottom:4px">Type</div>
+          <select id="est-f-etype" style="font-size:12px;border:1px solid var(--grey-200);border-radius:4px;padding:5px 7px;background:var(--white);color:var(--grey-700);font-family:var(--font);cursor:pointer">
+            <option value="estimate" selected>Estimate</option>
+            <option value="changeorder">Change order</option>
+            <option value="hrsonly">Hrs incurred</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="height:1px;background:var(--grey-100);margin:20px 0 14px"></div>
+  <button class="btn btn-primary" onclick="saveNewEstimate()" style="width:100%;padding:9px 0;font-size:13.5px;font-weight:600;border-radius:6px">Submit →</button>
+  <div style="text-align:center;margin-top:10px">
+    <button onclick="closeEstModal()" style="background:none;border:none;cursor:pointer;font-size:12px;color:var(--grey-400);padding:0;text-decoration:underline">Cancel</button>
+  </div>`;
+  setTimeout(() => { document.getElementById('est-f-brand')?.focus(); _estCalcTargetSend(); }, 50);
+}
+function saveNewEstimate() {
+  const required = [
+    { id:'est-f-brand',    get: el=>el.value.trim() },
+    { id:'est-f-contact',  get: el=>el.value.trim() },
+    { id:'est-f-job',      get: el=>el.value.trim() },
+    { id:'est-f-type',     get: el=>el.value.trim() },
+    { id:'est-f-received', get: el=>el.value },
+    { id:'est-f-dueback',  get: el=>el.value },
+    { id:'est-f-csowner',  get: el=>el.value },
+  ];
+  let firstEmpty = null;
+  required.forEach(f => {
+    const el = document.getElementById(f.id); if (!el) return;
+    const empty = !f.get(el);
+    el.style.borderColor = empty ? 'var(--red)' : '';
+    if (empty && !firstEmpty) firstEmpty = el;
+  });
+  if (firstEmpty) { firstEmpty.focus(); return; }
+  const g = id => document.getElementById(id);
+  const cx = document.querySelector('input[name="est-f-cx"]:checked')?.value || 'standard';
+  const targetIso = document.getElementById('est-f-target-display')?.dataset?.iso || '';
+  const csOwner = g('est-f-csowner').value;
+  const pmOwner = g('est-f-pmowner')?.value || '';
+  const est = {
+    id: `EST-${String(Date.now()).slice(-5)}${Math.random().toString(36).slice(2,4).toUpperCase()}`,
+    job: g('est-f-job').value.trim(),
+    brand: g('est-f-brand').value.trim(),
+    jobType: g('est-f-type').value.trim(),
+    clientContact: g('est-f-contact').value.trim(),
+    estimateType: g('est-f-etype')?.value || 'estimate',
+    estimateComplexity: cx,
+    csOwner, pmOwner,
+    owner: csOwner,
+    stage: 'client-req',
+    received: g('est-f-received').value,
+    dueBack: g('est-f-dueback').value,
+    target: targetIso,
+    rush: !!(document.getElementById('est-f-rush')?.checked),
+    urgent: false, notes: '', teamsLink: '', docUrl: '', source: 'sharepoint',
+    stageHistory: [], done: false, createdAt: new Date().toISOString(),
+  };
+  est.stageHistory.push({ type:'stage', stage:'client-req', who:csOwner||'CS', when:new Date(est.received+'T09:00:00').toISOString(), note:'CS brief received' });
+  if (!STATE.estimates) STATE.estimates = [];
+  STATE.estimates.unshift(est);
+  save(); closeEstModal(); renderEstimateTracker();
+}
+
+// ─────────────────────────────────────────────
+// ARCHIVE MODAL
+// ─────────────────────────────────────────────
+function showEstArchive() {
+  const done = (STATE.estimates||[]).filter(e => e.done);
+  const modal = document.getElementById('est-modal'), scrim = document.getElementById('est-modal-scrim');
+  if (!modal) return;
+  modal.style.display = 'block'; if (scrim) scrim.style.display = 'block';
+  modal.innerHTML = `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <div style="font-size:15px;font-weight:600">Archive · ${done.length} completed</div>
+    <button onclick="closeEstModal()" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--grey-400);line-height:1">✕</button>
+  </div>
+  ${!done.length ? '<div style="color:var(--grey-400);font-size:13px;text-align:center;padding:24px 0">No completed estimates yet.</div>'
+  : `<div style="display:flex;flex-direction:column;gap:6px;max-height:480px;overflow-y:auto">
+    ${[...done].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(e=>`
+      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--grey-100);border-radius:6px;padding:8px 12px;font-size:12.5px">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(e.job||'Untitled')}</div>
+          <div style="font-size:11px;color:var(--grey-400)">${escHtml(e.brand||'')}${e.owner?' · '+escHtml(e.owner):''}${e.target?' · sent '+fmtDM(e.target):''}</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="updateEstimateField('${e.id}','done',false);save();closeEstModal();renderEstimateTracker()">Reopen</button>
+      </div>`).join('')}
+  </div>`}`;
+}
+
+// ─────────────────────────────────────────────
+// WEBHOOK SETTINGS
+// ─────────────────────────────────────────────
+function showWebhookSettings() {
+  const modal = document.getElementById('est-modal'), scrim = document.getElementById('est-modal-scrim');
+  if (!modal) return;
+  modal.style.display = 'block'; if (scrim) scrim.style.display = 'block';
+  modal.innerHTML = `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="font-size:15px;font-weight:600">Notification settings</div>
+    <button onclick="closeEstModal()" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--grey-400);line-height:1">✕</button>
+  </div>
+  <div style="display:grid;gap:14px">
+    <div>
+      <label style="display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:0.05em;color:var(--grey-500);margin-bottom:5px">Teams incoming webhook URL</label>
+      <input id="webhook-url-input" class="est-modal-input" placeholder="https://prod-xx.westus.logic.azure.com/..." value="${escHtml(STATE.webhookUrl||'')}" style="font-family:monospace;font-size:11.5px">
+      <div style="font-size:11px;color:var(--grey-400);margin-top:5px">Notifications fire when an estimate breaches its stage threshold or target date. Leave blank to disable.</div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-secondary btn-sm" onclick="closeEstModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="STATE.webhookUrl=document.getElementById('webhook-url-input').value.trim();save();closeEstModal();alert(STATE.webhookUrl?'Webhook saved.':'Webhook cleared.')">Save</button>
+    </div>
+  </div>`;
+}
+
+// ─────────────────────────────────────────────
+// CSV EXPORT
+// ─────────────────────────────────────────────
+function exportEstimatesCSV() {
+  const cols = ['ID','Job','Brand','Job Type','Client Contact','Type','Stage','Owner','Received','Target','Elapsed (days)','Urgent','Notes','Created'];
+  const rows = (STATE.estimates||[]).map(e => [
+    e.id||'', e.job||'', e.brand||'', e.jobType||'', e.clientContact||'',
+    e.estimateType==='changeorder'?'Change order':e.estimateType==='hrsonly'?'Hrs tracking only':'Estimate',
+    estStageDef(e.stage).label, e.owner||'',
+    e.received||'', e.target||'', estElapsed(e),
+    estIsUrgent(e)?'Yes':'No', e.notes||'', e.createdAt?e.createdAt.slice(0,10):'',
+  ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(','));
+  const csv = [cols.map(c=>`"${c}"`).join(','), ...rows].join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `estimates_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+// ─────────────────────────────────────────────
+// TEAMS WEBHOOK
+// ─────────────────────────────────────────────
+function sendTeamsEscalationNotification(e, reasons) {
+  const url = (STATE.webhookUrl||'').trim(); if (!url) return;
+  const stageDef = estStageDef(e.stage);
+  fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+    '@type':'MessageCard', '@context':'http://schema.org/extensions',
+    themeColor:'FF6B00', summary:`Estimate escalated: ${e.job||e.id}`,
+    sections:[{ activityTitle:'⚠️ Estimate Escalated', activitySubtitle:`${e.id} · ${e.brand||'—'}`,
+      facts:[
+        {name:'Project', value:e.job||'Untitled'}, {name:'Brand', value:e.brand||'—'},
+        {name:'Stage', value:stageDef.label}, {name:'Owner', value:e.owner||'Unassigned'},
+        {name:'Time in stage', value:estFmtAge(e)}, {name:'Reason', value:reasons.join(', ')},
+      ],
+      potentialAction:[{'@type':'OpenUri', name:'Open Briefs & Estimates channel', targets:[{os:'default',uri:TEAMS_EST_CHANNEL}]}]
+    }]
+  })}).catch(()=>{});
+}
+function checkEscalationNotifications() {
+  if (!(STATE.webhookUrl||'').trim()) return;
+  const escalated = estAutoEscalations();
+  const now = Date.now(), cooldown = 4*3600*1000;
+  escalated.forEach(({e,reasons}) => {
+    const last = STATE.escalationNotified[e.id] || 0;
+    if (now - last >= cooldown) { STATE.escalationNotified[e.id]=now; save(); sendTeamsEscalationNotification(e,reasons); }
+  });
+  const ids = new Set(escalated.map(({e})=>e.id));
+  Object.keys(STATE.escalationNotified).forEach(id => { if (!ids.has(id)) delete STATE.escalationNotified[id]; });
+}
+
+// ─────────────────────────────────────────────
+// ESCALATION LOGIC
+// ─────────────────────────────────────────────
+function estAutoEscalations() {
+  return (STATE.estimates||[]).filter(e => !e.done && e.stage !== 'blocked').reduce((acc, e) => {
+    const reasons = [];
+    if (e.target && new Date() > new Date(e.target+'T23:59:59')) reasons.push('Target date passed');
+    const ageHrs = estStageAgeHrs(e), thr = estSLAThreshHrs(e);
+    if (thr > 0 && ageHrs >= thr) {
+      const label = ageHrs < 24 ? Math.round(ageHrs)+'h' : Math.floor(ageHrs/24)+'d';
+      reasons.push(`${label} stuck in ${estStageDef(e.stage).short}`);
+    }
+    if (reasons.length) acc.push({e, reasons});
+    return acc;
+  }, []);
+}
+
+// ─────────────────────────────────────────────
+// RENDER — TOP-LEVEL
+// ─────────────────────────────────────────────
+function renderEstimateTracker() {
+  renderEstStatusBar();
+  renderEstStandupStrip();
+  renderEstEscalationBar();
+  renderEstFilterBar();
+  renderEstTable();
+  renderEstLegend();
+  setTimeout(checkEscalationNotifications, 200);
+}
+
+// ─────────────────────────────────────────────
+// RENDER — STATUS BAR
+// ─────────────────────────────────────────────
+function renderEstStatusBar() {
+  const bar = document.getElementById('est-status-bar'); if (!bar) return;
+  const active = (STATE.estimates||[]).filter(e => !e.done);
+  const urgentN = active.filter(e => estIsUrgent(e)).length;
+  const stuckN  = active.filter(e => estIsStuck(e)).length;
+  const me = STATE.estViewAs || 'Maria', isTeam = me === '__team__';
+  const dow=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'], M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const now = new Date();
+  const dateStr = `${dow[now.getDay()]} ${now.getDate()} ${M[now.getMonth()]}`;
+  bar.innerHTML = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0 12px">
+    <span style="font-size:12px;color:var(--grey-500)">${dateStr}</span>
+    <span style="color:var(--grey-300)">·</span>
+    <span style="font-size:12px;color:var(--grey-600)">${active.length} active</span>
+    <span style="font-size:12px;color:${urgentN?'var(--red)':'var(--grey-400)'};font-weight:${urgentN?600:400}">${urgentN} urgent</span>
+    <span style="font-size:12px;color:${stuckN?'#b45309':'var(--grey-400)'};font-weight:${stuckN?600:400}">${stuckN} stuck</span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <select onchange="STATE.estViewAs=this.value;save();renderEstimateTracker()" style="font-size:12px;border:1px solid var(--grey-200);border-radius:5px;padding:3px 7px;background:var(--white)">
+        <option value="__team__"${isTeam?' selected':''}>— Team —</option>
+        <optgroup label="CS">${CS_MEMBERS.map(m=>`<option value="${escHtml(m)}"${me===m?' selected':''}>${escHtml(m)}</option>`).join('')}</optgroup>
+        <optgroup label="PM">${PM_MEMBERS.map(m=>`<option value="${escHtml(m)}"${me===m?' selected':''}>${escHtml(m)}</option>`).join('')}</optgroup>
+      </select>
+      <button class="btn btn-ghost btn-sm" onclick="exportEstimatesCSV()">↓ Export</button>
+      <button onclick="showWebhookSettings()" title="Notification settings" style="background:none;border:1px solid var(--grey-200);border-radius:5px;padding:4px 8px;font-size:13px;cursor:pointer;color:${STATE.webhookUrl?'var(--accent)':'var(--grey-400)'}">⚙</button>
+      <button onclick="showEstModal()" style="background:var(--accent);color:#fff;border:none;border-radius:5px;padding:4px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font)">+ New</button>
+    </span>
+  </div>`;
+}
+
+// ─────────────────────────────────────────────
+// RENDER — STANDUP STRIP (queue + pipeline)
+// ─────────────────────────────────────────────
+function _estMetric(label, value, tone) {
+  const col = tone==='red'?'var(--red)':tone==='amber'?'var(--amber)':'var(--grey-800)';
+  return `<div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:24px;font-weight:700;line-height:1;color:${col}">${value}</span><span style="font-size:9.5px;text-transform:uppercase;letter-spacing:0.05em;color:var(--grey-400)">${label}</span></div>`;
+}
+function _estFilterStage(key) {
+  _estStageFilter = _estStageFilter === key ? null : key;
+  renderEstFilterBar(); renderEstTable();
+}
+function renderEstStandupStrip() {
+  const strip = document.getElementById('est-standup-strip'); if (!strip) return;
+  const active = (STATE.estimates||[]).filter(e => !e.done);
+  const me = STATE.estViewAs || 'Maria', isTeam = me === '__team__';
+  const mine = isTeam
+    ? [...active].sort((a,b) => (b.rush?1:0)-(a.rush?1:0)||(estIsUrgent(b)?1:0)-(estIsUrgent(a)?1:0)||(a.owner||'').localeCompare(b.owner||''))
+    : active.filter(e => e.owner===me).sort((a,b) => (b.rush?1:0)-(a.rush?1:0)||(estIsUrgent(b)?1:0)-(estIsUrgent(a)?1:0));
+
+  // Pipeline: linear stages only; blocked shown separately
+  const linearSc = EST_LINEAR_STAGES.map(s => ({...s, count: active.filter(e => e.stage===s.key).length}));
+  const blockedCount = active.filter(e => e.stage==='blocked').length;
+  const totalLinear = linearSc.reduce((a,s) => a+s.count, 0);
+  const urgN = active.filter(e => estIsUrgent(e)).length;
+  const dueWk = active.filter(e => { if(!e.target)return false; const d=(new Date(e.target+'T00:00:00')-new Date())/86400000; return d>=0&&d<=7; }).length;
+  const elArr = active.filter(e => e.received&&(!e.estimateType||e.estimateType==='estimate')).map(e => estElapsed(e));
+  const avg = elArr.length ? (elArr.reduce((a,b)=>a+b,0)/elArr.length).toFixed(1)+'d' : '—';
+
+  strip.innerHTML = `<div class="est-strip-grid">
+    <div class="card" style="padding:0">
+      <div class="est-strip-hd">
+        <span class="est-strip-name">${isTeam?'Team queue today':escHtml(me)+"'s queue today"}</span>
+        <span style="font-size:11px;color:var(--grey-400)">${mine.length} active</span>
+      </div>
+      <div>${mine.length
+        ? mine.slice(0,6).map(e => {
+            const s = estStageDef(e.stage), isUrg = estIsUrgent(e), isBlocked = e.stage==='blocked';
+            return `<div class="est-strip-row" onclick="openEstDrawer('${e.id}')">
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;gap:6px;align-items:center;margin-bottom:3px">
+                  <span style="font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--grey-900)">${escHtml(e.job||'Untitled')}</span>
+                  ${isBlocked?`<span class="est-stage-badge est-s-blocked" style="font-size:10px;flex-shrink:0">⛔ Blocked</span>`:estStageBadge(e.stage)}
+                  ${isUrg&&!isBlocked?`<span class="badge badge-red" style="font-size:10px;flex-shrink:0;padding:0 5px">${e.rush?'Rush':'Urgent'}</span>`:''}
+                </div>
+                <div style="font-size:11px;color:var(--grey-400)">${isTeam&&e.owner?escHtml(e.owner):e.brand?escHtml(e.brand):'—'}</div>
+              </div>
+              ${isBlocked
+                ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEstDrawer('${e.id}')">Move stage ↗</button>`
+                : `<button class="btn btn-primary btn-sm" style="flex-shrink:0" onclick="event.stopPropagation();advanceEstStage('${e.id}')">${escHtml(s.action)} →</button>`}
+            </div>`;
+          }).join('') + (mine.length>6 ? `<div style="padding:8px 14px;font-size:11.5px;color:var(--grey-400)">+${mine.length-6} more</div>` : '')
+        : '<div style="padding:20px 14px;text-align:center;color:var(--grey-400);font-size:12px">All clear — nothing on you today.</div>'}
+      </div>
+    </div>
+
+    <div class="card" style="padding:0">
+      <div class="est-strip-hd">
+        <span class="est-strip-name">Team pipeline</span>
+        <span style="font-size:10.5px;color:var(--grey-300)">click stage to filter</span>
+      </div>
+      <div style="padding:12px 14px">
+        <!-- Linear pipeline bar + blocked indicator -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="display:flex;height:20px;border-radius:4px;overflow:hidden;flex:1;gap:1px">
+            ${linearSc.map(s => s.count ? `<div title="${s.label}: ${s.count}" onclick="_estFilterStage('${s.key}')" style="flex:${s.count};background:var(--est-${s.key}-bg);display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;color:var(--est-${s.key}-fg);cursor:pointer;min-width:20px">${s.count}</div>` : '').join('')}
+            ${!totalLinear ? '<div style="flex:1;background:var(--grey-100);border-radius:4px"></div>' : ''}
+          </div>
+          ${blockedCount ? `<div onclick="_estFilterStage('blocked')" title="Blocked: ${blockedCount}" style="cursor:pointer;display:flex;align-items:center;gap:4px;background:var(--est-blocked-bg);border:1px solid #fecaca;border-radius:4px;padding:2px 8px;font-size:11.5px;font-weight:700;color:var(--est-blocked-fg);flex-shrink:0;white-space:nowrap">⛔ ${blockedCount}</div>` : ''}
+        </div>
+        <!-- Stage dots legend -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+          ${linearSc.map(s => `<span onclick="_estFilterStage('${s.key}')" style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;cursor:pointer;opacity:${s.count?1:0.35}"><span style="width:7px;height:7px;border-radius:50%;background:var(--est-${s.key}-fg);display:inline-block;flex-shrink:0"></span><span style="color:var(--grey-700);font-weight:600">${s.count}</span><span style="color:var(--grey-400)">${s.label}</span></span>`).join('')}
+          ${blockedCount ? `<span onclick="_estFilterStage('blocked')" style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;cursor:pointer"><span style="width:7px;height:7px;border-radius:50%;background:var(--est-blocked-fg);display:inline-block;flex-shrink:0"></span><span style="color:var(--grey-700);font-weight:600">${blockedCount}</span><span style="color:var(--grey-400)">Blocked</span></span>` : ''}
+        </div>
+        <div style="display:flex;gap:20px;padding-top:12px;border-top:1px solid var(--grey-100)">
+          ${_estMetric('Urgent', urgN, urgN?'red':'')}
+          ${_estMetric('Due this week', dueWk, dueWk?'amber':'')}
+          ${_estMetric('Avg elapsed', avg, '')}
+          ${_estMetric('Active', active.length, '')}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─────────────────────────────────────────────
+// RENDER — ESCALATION BAR
+// ─────────────────────────────────────────────
+function renderEstEscalationBar() {
+  const bar = document.getElementById('est-escalation-bar'); if (!bar) return;
+  const items = estAutoEscalations();
+  if (!items.length) { bar.innerHTML = ''; return; }
+  bar.innerHTML = `<div style="background:#fff8f0;border:1px solid #fed7aa;border-radius:8px;padding:10px 14px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span style="font-size:13px">⚠️</span>
+      <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#92400e">Auto-escalations · ${items.length} item${items.length>1?'s':''} need attention</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${items.map(({e,reasons}) => `
+      <div onclick="openEstDrawer('${e.id}')" style="display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #fed7aa;border-radius:6px;padding:7px 11px;cursor:pointer;font-size:12.5px">
+        <span style="font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(e.job||'Untitled')}</span>
+        ${estStageBadge(e.stage)}
+        <span style="color:var(--grey-500);font-size:11.5px;flex-shrink:0">${escHtml(e.owner||'Unassigned')}</span>
+        <span style="color:#b45309;font-size:11.5px;flex-shrink:0">${reasons.join(' · ')}</span>
+        <button class="btn btn-primary btn-sm" style="flex-shrink:0;font-size:11px" onclick="event.stopPropagation();advanceEstStage('${e.id}')">${escHtml(estStageDef(e.stage).action)} →</button>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+// ─────────────────────────────────────────────
+// RENDER — FILTER BAR
+// ─────────────────────────────────────────────
+function renderEstFilterBar() {
+  const bar = document.getElementById('est-filter-bar'); if (!bar) return;
+  const active = (STATE.estimates||[]).filter(e => !e.done);
+  const me = STATE.estViewAs || 'Maria', isTeam = me === '__team__';
+  const mineCount = isTeam ? active.length : active.filter(e => e.owner===me).length;
+  const counts = { mine:mineCount, all:active.length, urgent:active.filter(e=>estIsUrgent(e)).length, stuck:active.filter(e=>estIsStuck(e)).length };
+  const tabs = [['mine',isTeam?'Team':'Mine'],['all','All'],['urgent','Urgent'],['stuck','Stuck']];
+  bar.innerHTML = `<div class="est-filter-row">
+    <div class="est-seg">
+      ${tabs.map(([k,l]) => `<button class="${_estFilter===k?'active':''}" onclick="_estFilter='${k}';_estStageFilter=null;renderEstFilterBar();renderEstTable()">${l}${counts[k]?' · '+counts[k]:''}</button>`).join('')}
+    </div>
+    ${_estStageFilter ? `<button class="btn btn-ghost btn-sm" onclick="_estStageFilter=null;renderEstFilterBar();renderEstTable()">Stage: ${estStageDef(_estStageFilter).short} ✕</button>` : ''}
+    <span style="margin-left:auto;display:flex;align-items:center;gap:12px">
+      <button onclick="showEstArchive()" style="background:none;border:none;cursor:pointer;font-size:11.5px;color:var(--grey-400);padding:0;text-decoration:underline">Archive ↗</button>
+      <span style="font-size:11px;color:var(--grey-300)">urgent first, then target</span>
+    </span>
+  </div>`;
+}
+
+// ─────────────────────────────────────────────
+// RENDER — TABLE
+// ─────────────────────────────────────────────
+function renderEstTable() {
+  const wrap = document.getElementById('est-table-wrap'); if (!wrap) return;
+  const me = STATE.estViewAs || 'Maria', isTeam = me === '__team__';
+  let rows = (STATE.estimates||[]).filter(e => !e.done);
+  if (_estFilter==='mine'&&!isTeam) rows = rows.filter(e => e.owner===me);
+  if (_estFilter==='urgent')        rows = rows.filter(e => estIsUrgent(e));
+  if (_estFilter==='stuck')         rows = rows.filter(e => estIsStuck(e));
+  if (_estStageFilter)              rows = rows.filter(e => e.stage===_estStageFilter);
+  rows = [...rows].sort((a,b) =>
+    (b.rush?1:0)-(a.rush?1:0) ||
+    (estIsUrgent(b)?1:0)-(estIsUrgent(a)?1:0) ||
+    (a.target||'zzz').localeCompare(b.target||'zzz')
+  );
+  if (!rows.length) { wrap.innerHTML='<div style="padding:32px;text-align:center;color:var(--grey-400);font-size:13px">No estimates match this view.</div>'; return; }
+
+  // Group by stage (linear order first, then blocked)
+  const stageOrder = [...EST_LINEAR_STAGES, EST_STAGES.find(s=>s.key==='blocked')];
+  const grouped = stageOrder.map(s => ({stage:s, items:rows.filter(e=>e.stage===s.key)})).filter(g=>g.items.length);
+  const knownKeys = new Set(EST_STAGES.map(s=>s.key));
+  const unknown = rows.filter(e => !knownKeys.has(e.stage));
+  if (unknown.length) grouped.push({ stage:{key:'__other__',short:'Other',label:'Other',action:'Review'}, items:unknown });
+
+  let html = `<div style="overflow-x:auto"><table class="est-tbl"><thead><tr>
+    <th style="width:38px"></th>
+    <th>Job · Brand · Contact</th>
+    <th style="width:120px">Owner</th>
+    <th style="width:80px">Received</th>
+    <th style="width:80px">Target</th>
+    <th style="width:58px">Age</th>
+    <th style="width:30px" title="Urgent">⚠</th>
+    <th style="width:170px;text-align:right">Action</th>
+  </tr></thead><tbody>`;
+
+  grouped.forEach(({stage:st, items}) => {
+    const isBlockedGroup = st.key === 'blocked';
+    const collapsed = _estCollapsedStages.has(st.key);
+    html += `<tr onclick="_estCollapsedStages.has('${st.key}')?_estCollapsedStages.delete('${st.key}'):_estCollapsedStages.add('${st.key}');renderEstTable()" style="cursor:pointer;background:${isBlockedGroup?'#fff5f5':'var(--grey-50)'}">
+      <td colspan="8" style="padding:6px 12px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:10px;color:var(--grey-400);display:inline-block;transform:rotate(${collapsed?'0':'-90'}deg);transition:transform 0.15s">▶</span>
+          ${isBlockedGroup
+            ? `<span class="est-stage-badge est-s-blocked">⛔ Blocked</span>`
+            : estStageBadge(st.key)}
+          <span style="font-size:12px;font-weight:600;color:${isBlockedGroup?'var(--red)':'var(--grey-700)'}">${st.label}</span>
+          <span style="font-size:11px;color:var(--grey-400)">${items.length} estimate${items.length>1?'s':''}</span>
+          ${!isBlockedGroup&&items.some(e=>estIsStuck(e))?`<span style="font-size:10.5px;font-weight:600;background:#fff3cd;color:#92400e;border-radius:3px;padding:1px 6px">${items.filter(e=>estIsStuck(e)).length} stuck</span>`:''}
+          ${!isBlockedGroup&&items.some(e=>estIsPastDue(e))?`<span style="font-size:10.5px;font-weight:600;background:#fee2e2;color:#b91c1c;border-radius:3px;padding:1px 6px">${items.filter(e=>estIsPastDue(e)).length} past due</span>`:''}
+        </div>
+      </td>
+    </tr>`;
+
+    if (!collapsed) {
+      items.forEach(e => {
+        const urg=estIsUrgent(e), stuck=estIsStuck(e), pastdue=estIsPastDue(e), amber=estElapsedAmber(e);
+        const ageLabel=estFmtAge(e), open=_estOpenId===e.id;
+        const s=estStageDef(e.stage), isBlocked=e.stage==='blocked';
+        const typeTag = e.estimateType==='changeorder'
+          ? '<span style="display:inline-block;margin-left:5px;font-size:9.5px;font-weight:700;background:#eff6ff;color:#1d4ed8;border-radius:3px;padding:0 4px;vertical-align:middle">CO</span>'
+          : e.estimateType==='hrsonly'
+          ? '<span style="display:inline-block;margin-left:5px;font-size:9.5px;font-weight:700;background:#f5f3ff;color:#7c3aed;border-radius:3px;padding:0 4px;vertical-align:middle">Hrs</span>'
+          : '';
+        const rushTag = e.rush ? '<span style="display:inline-block;margin-left:5px;font-size:9.5px;font-weight:800;background:#dc2626;color:#fff;border-radius:3px;padding:1px 5px;vertical-align:middle;letter-spacing:0.04em;text-transform:uppercase">Rush</span>' : '';
+        const blockedBadge = isBlocked ? '<span style="display:inline-block;margin-left:5px;font-size:9.5px;font-weight:700;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:3px;padding:0 5px;vertical-align:middle">⛔ Blocked</span>' : '';
+        const actionBtn = isBlocked
+          ? `<button class="btn btn-ghost btn-sm" onclick="openEstDrawer('${e.id}')">Move stage ↗</button>`
+          : e.stage === 'client-review'
+          ? `<button class="btn btn-secondary btn-sm" onclick="advanceEstStage('${e.id}')">Mark complete</button>`
+          : `<button class="btn btn-sm" onclick="advanceEstStage('${e.id}')" style="background:${e.rush?'#dc2626':'var(--accent)'};color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:var(--font);white-space:nowrap">${escHtml(s.action)} →</button>`;
+        const rowClass = isBlocked ? 'est-row-blocked' : (e.rush ? 'est-row-stuck' : (urg&&!e.rush ? 'est-row-urgent' : (open ? 'est-row-open' : '')));
+        html += `<tr class="${rowClass}" onclick="openEstDrawer('${e.id}')" style="cursor:pointer${e.rush?';border-left:3px solid #dc2626':''}">
+          <td style="padding-left:16px;color:var(--grey-300);font-family:monospace;font-size:10px;white-space:nowrap">${escHtml((e.id||'').slice(-6))}</td>
+          <td>
+            <div style="font-weight:600;font-size:13px">${escHtml(e.job||'Untitled')}${typeTag}${rushTag}${blockedBadge} ${!isBlocked?estComplexityBadge(e):''}${!isBlocked&&!e.rush&&urg?'<span class="badge badge-red" style="font-size:10px;margin-left:5px;vertical-align:middle">Urgent</span>':''}${!isBlocked&&stuck&&!pastdue&&!e.rush?'<span style="display:inline-block;margin-left:5px;font-size:10px;font-weight:600;background:#fff3cd;color:#92400e;border-radius:3px;padding:0 4px;vertical-align:middle">Stuck</span>':''}${!isBlocked&&pastdue&&!e.rush?'<span style="display:inline-block;margin-left:5px;font-size:10px;font-weight:600;background:#fee2e2;color:#b91c1c;border-radius:3px;padding:0 4px;vertical-align:middle">Past due</span>':''}</div>
+            <div style="font-size:11px;color:var(--grey-400);margin-top:1px">${escHtml(e.brand||'—')}${e.clientContact?` · <span style="color:var(--grey-500)">${escHtml(e.clientContact)}</span>`:''}</div>
+          </td>
+          <td style="font-size:12.5px">${escHtml(e.owner||'—')}</td>
+          <td style="font-size:12px;color:var(--grey-500)">${fmtDM(e.received)||'—'}</td>
+          <td style="font-size:12px;font-weight:${pastdue?600:400};color:${pastdue?'var(--red)':'var(--grey-700)'}">${fmtDM(e.target)||'—'}</td>
+          <td style="font-size:12px;color:${isBlocked?'var(--red)':stuck||pastdue?'var(--red)':amber?'var(--amber)':'var(--grey-500)'};font-weight:${isBlocked||stuck||pastdue?600:400}">${isBlocked?'—':ageLabel}</td>
+          <td style="text-align:center"><button onclick="event.stopPropagation();toggleEstUrgent('${e.id}')" title="${e.urgent?'Remove urgent':'Flag as urgent'}" style="background:none;border:none;cursor:pointer;font-size:13px;color:${e.urgent||e.rush?'var(--red)':'var(--grey-200)'};padding:0">⚠</button></td>
+          <td style="text-align:right" onclick="event.stopPropagation()">${actionBtn}</td>
+        </tr>`;
+      });
+    }
+  });
+  html += `</tbody></table></div>`;
+  wrap.innerHTML = html;
+}
+
+// ─────────────────────────────────────────────
+// RENDER — LEGEND
+// ─────────────────────────────────────────────
+function renderEstLegend() {
+  const el = document.getElementById('est-legend'); if (!el) return;
+  const fmtThr = hrs => hrs === 0 ? '—' : hrs < 24 ? hrs+'h' : hrs/24+'d';
+  el.innerHTML = `<div style="margin-top:16px;padding:10px 16px;background:var(--grey-50);border:1px solid var(--grey-100);border-radius:6px;font-size:11px;color:var(--grey-500)">
+    <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--grey-300);margin-bottom:10px">Escalation thresholds · auto-flag when stage age exceeds limit</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;align-items:start">
+      <div>
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">
+          <span style="font-size:9.5px;font-weight:700;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:3px;padding:0 5px">Standard</span>
+          <span style="font-size:10px;color:var(--grey-400)">72 hrs</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          ${EST_LINEAR_STAGES.map(s=>`<div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-${s.key}" style="font-size:9.5px">${s.short}</span><span style="color:var(--grey-400)">after ${fmtThr(EST_SLA.standard.threshHrs[s.key])}</span></div>`).join('')}
+          <div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-blocked" style="font-size:9.5px">Blocked</span><span style="color:var(--grey-400)">no SLA</span></div>
+        </div>
+      </div>
+      <div style="border-left:1px solid var(--grey-100);padding-left:14px">
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">
+          <span style="font-size:9.5px;font-weight:700;background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff;border-radius:3px;padding:0 5px">Complex</span>
+          <span style="font-size:10px;color:var(--grey-400)">7 days</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          ${EST_LINEAR_STAGES.map(s=>`<div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-${s.key}" style="font-size:9.5px">${s.short}</span><span style="color:var(--grey-400)">after ${fmtThr(EST_SLA.complex.threshHrs[s.key])}</span></div>`).join('')}
+          <div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-blocked" style="font-size:9.5px">Blocked</span><span style="color:var(--grey-400)">no SLA</span></div>
+        </div>
+      </div>
+      <div style="border-left:1px solid var(--grey-100);padding-left:14px">
+        <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--grey-300);margin-bottom:6px">Age colour</div>
+        <div style="display:flex;flex-direction:column;gap:4px;font-size:10.5px">
+          <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--grey-500);font-weight:600">Grey</span><span style="color:var(--grey-400)">under 60% SLA</span></div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--amber);font-weight:600">Amber</span><span style="color:var(--grey-400)">60%+ elapsed</span></div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:600">Red</span><span style="color:var(--grey-400)">stuck / past due</span></div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:600">⛔ Red</span><span style="color:var(--grey-400)">blocked (manual)</span></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+function init() {
+  loadState();
+  const now = new Date();
+  const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const M   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const el  = document.getElementById('today-date');
+  if (el) el.textContent = `${dow[now.getDay()]} ${now.getDate()} ${M[now.getMonth()]}`;
+  renderEstimateTracker();
+}
+window.addEventListener('load', checkAuth);
+
+// client-sentence helper
+function estClientSentence(e) {
+  const stage = estStageDef(e.stage);
+  const targetStr = e.target ? ` Target send: ${fmtDM(e.target)}.` : '';
+  const typeStr = e.estimateType==='changeorder'?' (Change order)':e.estimateType==='hrsonly'?' (Hrs tracking only)':'';
+  return `${escHtml(e.job||'Untitled')}${typeStr} — currently at ${stage.label} stage. Owner: ${escHtml(e.owner||'TBD')}.${escHtml(targetStr)}`;
+}
+function copyEstClientSentence(id) {
+  const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
+  const stage = estStageDef(e.stage);
+  const targetStr = e.target ? ` Target send: ${fmtDM(e.target)}.` : '';
+  const typeStr = e.estimateType==='changeorder'?' (Change order)':e.estimateType==='hrsonly'?' (Hrs tracking only)':'';
+  const text = `${e.job||'Untitled'}${typeStr} — currently at ${stage.label} stage. Owner: ${e.owner||'TBD'}.${targetStr}`;
+  navigator.clipboard?.writeText(text).then(() => {
+    const btn = document.getElementById('est-copy-sentence-btn-' + id);
+    if (btn) { const orig=btn.textContent; btn.textContent='Copied!'; setTimeout(()=>{btn.textContent=orig;},1500); }
+  });
+}
+</script>
+</body>
+</html>
