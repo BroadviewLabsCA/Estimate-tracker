@@ -191,6 +191,7 @@
   }
   .est-move-to-select:focus { border-color: var(--accent); outline: none; }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -279,10 +280,12 @@ function doLogout() {
 // CONSTANTS
 // ─────────────────────────────────────────────
 const STORAGE_KEY    = 'bvl-est-v1';
+const LEGEND_KEY     = 'bvl-est-legend';
 const CS_MEMBERS     = ['Bailey','Tyler','Katie'];
 const PM_MEMBERS     = ['Maria','Natacha W.','Michael','Celane'];
 const PRC_MEMBERS    = ['Judith'];
-const TEAMS_EST_CHANNEL = 'https://teams.microsoft.com/l/channel/19%3A5279922368e74f288be78a25c4eafcaa%40thread.tacv2/Briefs%20-%20Timelines%20-%20Estimates%20(Internal)?groupId=a96096f4-142d-4824-8578-58911067f5f7&tenantId=3a575746-9c5e-4a5b-8fff-ce3d4299df60&ngc=true';
+const TEAMS_EST_CHANNEL = 'https://teams.microsoft.com/l/channel/19%3A5279922368e74f288be78a25c4eafcaa%40thread.tacv2/Briefs%20-%20Timelines%20-%20Estimates%20(Internal)?groupId=a96096f4-142d-4824-8578-58911067f5f7&tenantId=3a575746-9c5e-4a5b-8fff-ce3d4299df60&preferWeb=1';
+function openTeamsChannel() { window.open(TEAMS_EST_CHANNEL, '_blank', 'noopener,noreferrer'); }
 
 const EST_STAGES = [
   { key:'client-req',    label:'Client New Job Request', short:'New Request',   roleCat:'CS', action:'Start CS brief'       },
@@ -651,8 +654,8 @@ function renderEstDrawer(e) {
     <div class="est-drawer-block" style="padding-top:14px">
       <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:0.07em;font-weight:700;color:var(--grey-400);margin-bottom:8px">Links</div>
       <div style="display:flex;flex-direction:column;gap:6px">
-        <a href="${TEAMS_EST_CHANNEL}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#6264a7;text-decoration:none">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Briefs &amp; Estimates channel</a>
+        <button onclick="openTeamsChannel()" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#6264a7;text-decoration:none;background:none;border:none;cursor:pointer;font-family:var(--font);padding:0">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Briefs - Timelines - Estimates</button>
         <div style="display:flex;align-items:center;gap:6px">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--grey-400)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           ${e.docUrl
@@ -1025,22 +1028,180 @@ function showWebhookSettings() {
 }
 
 // ─────────────────────────────────────────────
-// CSV EXPORT
+// XLSX EXPORT
 // ─────────────────────────────────────────────
-function exportEstimatesCSV() {
-  const cols = ['ID','Job','Brand','Job Type','Client Contact','Type','Stage','Owner','Received','Target','Elapsed (days)','Urgent','Notes','Created'];
-  const rows = (STATE.estimates||[]).map(e => [
-    e.id||'', e.job||'', e.brand||'', e.jobType||'', e.clientContact||'',
-    e.estimateType==='changeorder'?'Change order':e.estimateType==='hrsonly'?'Hrs tracking only':'Estimate',
-    estStageDef(e.stage).label, e.owner||'',
-    e.received||'', e.target||'', estElapsed(e),
-    estIsUrgent(e)?'Yes':'No', e.notes||'', e.createdAt?e.createdAt.slice(0,10):'',
-  ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(','));
-  const csv = [cols.map(c=>`"${c}"`).join(','), ...rows].join('\n');
-  const a = document.createElement('a');
-  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-  a.download = `estimates_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
+function showExportModal() {
+  const modal = document.getElementById('est-modal'), scrim = document.getElementById('est-modal-scrim');
+  const today = new Date(); const todayStr = today.toISOString().slice(0,10);
+  const d30 = new Date(today); d30.setDate(d30.getDate() - 30);
+  const fromStr = d30.toISOString().slice(0,10);
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <span style="font-weight:700;font-size:14px">Export Estimates</span>
+      <button onclick="closeEstModal()" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--grey-400);padding:0;line-height:1">✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px">Date range (brief received)</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="date" id="exp-from" class="est-modal-input" value="${fromStr}" style="flex:1">
+          <span style="font-size:12px;color:var(--grey-400)">to</span>
+          <input type="date" id="exp-to" class="est-modal-input" value="${todayStr}" style="flex:1">
+        </div>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px">Scope</label>
+        <select id="exp-scope" class="est-modal-input">
+          <option value="all">All estimates</option>
+          <option value="active">Active only (not done)</option>
+          <option value="completed">Completed only</option>
+          <option value="escalated">Escalated only</option>
+        </select>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px">
+        <button class="btn btn-ghost btn-sm" onclick="closeEstModal()">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="runExport()">↓ Export XLSX</button>
+      </div>
+    </div>`;
+  modal.style.display = 'block'; scrim.style.display = 'block';
+}
+
+function runExport() {
+  if (typeof XLSX === 'undefined') { alert('SheetJS not loaded — check network connection.'); return; }
+  const from  = document.getElementById('exp-from').value;
+  const to    = document.getElementById('exp-to').value;
+  const scope = document.getElementById('exp-scope').value;
+  const scopeLabel = { all:'All', active:'Active only', completed:'Completed only', escalated:'Escalated only' }[scope] || scope;
+  closeEstModal();
+
+  const fromD = from ? new Date(from + 'T00:00:00') : null;
+  const toD   = to   ? new Date(to   + 'T23:59:59') : null;
+
+  const ests = (STATE.estimates || []).filter(e => {
+    if (fromD || toD) {
+      const rec = e.received ? new Date(e.received + 'T00:00:00') : new Date(e.createdAt);
+      if (fromD && rec < fromD) return false;
+      if (toD   && rec > toD)   return false;
+    }
+    if (scope === 'active')    return !e.done;
+    if (scope === 'completed') return !!e.done;
+    if (scope === 'escalated') return estIsStuck(e);
+    return true;
+  });
+
+  const typeLabel   = t => t === 'changeorder' ? 'Change order' : t === 'hrsonly' ? 'Hrs tracking only' : 'Estimate';
+  const firstSentDate = e => { const h = (e.stageHistory||[]).find(h => h.stage === 'cs-sent'); return h ? h.when.slice(0,10) : ''; };
+  const outcomeLabel  = e => { if (e.stage === 'blocked') return 'Blocked'; return e.done ? 'Won' : 'In progress'; };
+  const slaMet = e => {
+    if (_estSLAExempt(e)) return 'N/A';
+    if (!e.done) return 'In progress';
+    const sent = firstSentDate(e);
+    if (!sent || !e.target) return 'In progress';
+    return new Date(sent) <= new Date(e.target + 'T23:59:59') ? 'Yes' : 'No';
+  };
+
+  // Sheet 1 — Estimates
+  const estHeaders = ['EST ID','Project Name','Brand','Client Contact','Job Type','Complexity','Type','Rush','Stage','CS Owner','PM Assigned','Brief Received','Due Back','Target Send','Actual Sent','Days Elapsed Total','Days in Current Stage','SLA','SLA Met','Outcome','Escalated','Notes','Created Date'];
+  const estRows = ests.map(e => [
+    e.id || '',
+    e.job || '',
+    e.brand || '',
+    e.clientContact || '',
+    e.jobType || '',
+    e.estimateComplexity === 'complex' ? 'Complex' : 'Standard',
+    typeLabel(e.estimateType),
+    e.rush ? 'Yes' : 'No',
+    estStageDef(e.stage).label,
+    e.csOwner || '',
+    e.pmOwner || '',
+    e.received || '',
+    e.dueBack || '',
+    e.target || '',
+    firstSentDate(e),
+    estElapsed(e),
+    estStageAgeDays(e),
+    estSLATotalHrs(e) === 72 ? '72h Standard' : '7d Complex',
+    slaMet(e),
+    outcomeLabel(e),
+    estIsStuck(e) ? 'Yes' : 'No',
+    e.notes || '',
+    e.createdAt ? e.createdAt.slice(0,10) : '',
+  ]);
+  const ws1 = XLSX.utils.aoa_to_sheet([estHeaders, ...estRows]);
+
+  // Sheet 2 — Summary
+  const active    = ests.filter(e => !e.done && e.stage !== 'blocked');
+  const completed = ests.filter(e => e.done);
+  const blocked   = ests.filter(e => e.stage === 'blocked');
+  const rush      = ests.filter(e => e.rush);
+  const escalated = ests.filter(e => estIsStuck(e));
+
+  const byField = (arr, key) => {
+    const map = {}; arr.forEach(e => { const k = e[key] || 'Unknown'; map[k] = (map[k]||0) + 1; });
+    return Object.entries(map).sort((a,b) => b[1]-a[1]);
+  };
+  const slaArr = (subset) => subset.filter(e => !_estSLAExempt(e) && e.done && firstSentDate(e) && e.target).map(e => new Date(firstSentDate(e)) <= new Date(e.target+'T23:59:59') ? 1 : 0);
+  const slaRate = arr => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length*100)+'%' : '—';
+  const turnDays = ests.filter(e => firstSentDate(e) && e.received).map(e => (new Date(firstSentDate(e)) - new Date(e.received+'T00:00:00')) / 86400000);
+
+  const ws2 = XLSX.utils.aoa_to_sheet([
+    ['OVERVIEW', ''],
+    ['Total estimates',  ests.length],
+    ['Active',           active.length],
+    ['Completed',        completed.length],
+    ['Blocked',          blocked.length],
+    ['Rush',             rush.length],
+    ['Escalated',        escalated.length],
+    [],
+    ['STAGE BREAKDOWN', 'Count'],
+    ...EST_STAGES.map(s => [s.label, ests.filter(e => e.stage === s.key).length]),
+    [],
+    ['COMPLEXITY', 'Count'],
+    ['Standard', ests.filter(e => e.estimateComplexity !== 'complex').length],
+    ['Complex',  ests.filter(e => e.estimateComplexity === 'complex').length],
+    [],
+    ['JOB TYPE', 'Count', 'Avg Days'],
+    ...(() => {
+      const m = {}; ests.forEach(e => { const t=e.jobType||'Unknown'; if(!m[t]) m[t]={n:0,d:[]}; m[t].n++; m[t].d.push(estElapsed(e)); });
+      return Object.entries(m).sort((a,b)=>b[1].n-a[1].n).map(([t,v]) => [t, v.n, v.d.length ? Math.round(v.d.reduce((a,b)=>a+b,0)/v.d.length) : '—']);
+    })(),
+    [],
+    ['BRAND', 'Count'],
+    ...byField(ests, 'brand'),
+    [],
+    ['CS OWNER', 'Count'],
+    ...byField(ests, 'csOwner'),
+    [],
+    ['PM ASSIGNED', 'Count'],
+    ...byField(ests, 'pmOwner'),
+    [],
+    ['SLA PERFORMANCE', ''],
+    ['SLA met — overall',   slaRate(slaArr(ests))],
+    ['SLA met — Standard',  slaRate(slaArr(ests.filter(e=>e.estimateComplexity!=='complex')))],
+    ['SLA met — Complex',   slaRate(slaArr(ests.filter(e=>e.estimateComplexity==='complex')))],
+    [],
+    ['TURNAROUND (received → cs-sent, days)', ''],
+    ['Average', turnDays.length ? Math.round(turnDays.reduce((a,b)=>a+b,0)/turnDays.length) : '—'],
+    ['Fastest', turnDays.length ? Math.round(Math.min(...turnDays)) : '—'],
+    ['Slowest', turnDays.length ? Math.round(Math.max(...turnDays)) : '—'],
+    [],
+    ['RUSH & ESCALATION', ''],
+    ['Rush count', rush.length],
+    ['Rush %',     ests.length ? Math.round(rush.length/ests.length*100)+'%' : '—'],
+    ['Escalated',  escalated.length],
+    [],
+    ['WIN RATE', ''],
+    ['Won',             completed.length],
+    ['Won + Active',    completed.length + active.length],
+    ['Win rate',        (completed.length+active.length) ? Math.round(completed.length/(completed.length+active.length)*100)+'%' : '—'],
+    [],
+    ['Export date', new Date().toISOString().slice(0,10), 'Scope', scopeLabel],
+  ]);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws1, 'Estimates');
+  XLSX.utils.book_append_sheet(wb, ws2, 'Summary');
+  XLSX.writeFile(wb, `BVL-estimates-${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 // ─────────────────────────────────────────────
@@ -1058,7 +1219,7 @@ function sendTeamsEscalationNotification(e, reasons) {
         {name:'Stage', value:stageDef.label}, {name:'Owner', value:e.owner||'Unassigned'},
         {name:'Time in stage', value:estFmtAge(e)}, {name:'Reason', value:reasons.join(', ')},
       ],
-      potentialAction:[{'@type':'OpenUri', name:'Open Briefs & Estimates channel', targets:[{os:'default',uri:TEAMS_EST_CHANNEL}]}]
+      potentialAction:[{'@type':'OpenUri', name:'Open Briefs - Timelines - Estimates', targets:[{os:'default',uri:TEAMS_EST_CHANNEL}]}]
     }]
   })}).catch(()=>{});
 }
@@ -1128,7 +1289,7 @@ function renderEstStatusBar() {
         <optgroup label="CS">${CS_MEMBERS.map(m=>`<option value="${escHtml(m)}"${me===m?' selected':''}>${escHtml(m)}</option>`).join('')}</optgroup>
         <optgroup label="PM">${PM_MEMBERS.map(m=>`<option value="${escHtml(m)}"${me===m?' selected':''}>${escHtml(m)}</option>`).join('')}</optgroup>
       </select>
-      <button class="btn btn-ghost btn-sm" onclick="exportEstimatesCSV()">↓ Export</button>
+      <button class="btn btn-ghost btn-sm" onclick="showExportModal()">↓ Export</button>
       <button onclick="showWebhookSettings()" title="Notification settings" style="background:none;border:1px solid var(--grey-200);border-radius:5px;padding:4px 8px;font-size:13px;cursor:pointer;color:${STATE.webhookUrl?'var(--accent)':'var(--grey-400)'}">⚙</button>
       <button onclick="showEstModal()" style="background:var(--accent);color:#fff;border:none;border-radius:5px;padding:4px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font)">+ New</button>
     </span>
@@ -1362,42 +1523,54 @@ function renderEstTable() {
 // ─────────────────────────────────────────────
 // RENDER — LEGEND
 // ─────────────────────────────────────────────
+function toggleEstLegend() {
+  const open = localStorage.getItem(LEGEND_KEY) === '1';
+  localStorage.setItem(LEGEND_KEY, open ? '0' : '1');
+  renderEstLegend();
+}
 function renderEstLegend() {
   const el = document.getElementById('est-legend'); if (!el) return;
+  const open = localStorage.getItem(LEGEND_KEY) === '1';
   const fmtThr = hrs => hrs === 0 ? '—' : hrs < 24 ? hrs+'h' : hrs/24+'d';
-  el.innerHTML = `<div style="margin-top:16px;padding:10px 16px;background:var(--grey-50);border:1px solid var(--grey-100);border-radius:6px;font-size:11px;color:var(--grey-500)">
-    <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--grey-300);margin-bottom:10px">Escalation thresholds · auto-flag when stage age exceeds limit</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;align-items:start">
-      <div>
-        <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">
-          <span style="font-size:9.5px;font-weight:700;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:3px;padding:0 5px">Standard</span>
-          <span style="font-size:10px;color:var(--grey-400)">72 hrs</span>
+  el.innerHTML = `<div style="margin-top:12px">
+    <button onclick="toggleEstLegend()" style="display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:none;cursor:pointer;padding:5px 2px;text-align:left;gap:8px">
+      <span style="font-size:10.5px;color:var(--grey-300);letter-spacing:0.01em">Escalation thresholds &amp; SLA rules</span>
+      <span style="font-size:9px;color:var(--grey-300);transition:transform 0.15s;display:inline-block;transform:${open?'rotate(90deg)':'rotate(0deg)'}">&#9654;</span>
+    </button>
+    ${open ? `<div style="margin-top:6px;padding:10px 16px;background:var(--grey-50);border:1px solid var(--grey-100);border-radius:6px;font-size:11px;color:var(--grey-500)">
+      <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--grey-300);margin-bottom:10px">Escalation thresholds · auto-flag when stage age exceeds limit</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;align-items:start">
+        <div>
+          <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">
+            <span style="font-size:9.5px;font-weight:700;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:3px;padding:0 5px">Standard</span>
+            <span style="font-size:10px;color:var(--grey-400)">72 hrs</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            ${EST_LINEAR_STAGES.map(s=>`<div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-${s.key}" style="font-size:9.5px">${s.short}</span><span style="color:var(--grey-400)">after ${fmtThr(EST_SLA.standard.threshHrs[s.key])}</span></div>`).join('')}
+            <div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-blocked" style="font-size:9.5px">Blocked</span><span style="color:var(--grey-400)">no SLA</span></div>
+          </div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          ${EST_LINEAR_STAGES.map(s=>`<div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-${s.key}" style="font-size:9.5px">${s.short}</span><span style="color:var(--grey-400)">after ${fmtThr(EST_SLA.standard.threshHrs[s.key])}</span></div>`).join('')}
-          <div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-blocked" style="font-size:9.5px">Blocked</span><span style="color:var(--grey-400)">no SLA</span></div>
+        <div style="border-left:1px solid var(--grey-100);padding-left:14px">
+          <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">
+            <span style="font-size:9.5px;font-weight:700;background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff;border-radius:3px;padding:0 5px">Complex</span>
+            <span style="font-size:10px;color:var(--grey-400)">7 days</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            ${EST_LINEAR_STAGES.map(s=>`<div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-${s.key}" style="font-size:9.5px">${s.short}</span><span style="color:var(--grey-400)">after ${fmtThr(EST_SLA.complex.threshHrs[s.key])}</span></div>`).join('')}
+            <div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-blocked" style="font-size:9.5px">Blocked</span><span style="color:var(--grey-400)">no SLA</span></div>
+          </div>
+        </div>
+        <div style="border-left:1px solid var(--grey-100);padding-left:14px">
+          <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--grey-300);margin-bottom:6px">Age colour</div>
+          <div style="display:flex;flex-direction:column;gap:4px;font-size:10.5px">
+            <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--grey-500);font-weight:600">Grey</span><span style="color:var(--grey-400)">under 60% SLA</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--amber);font-weight:600">Amber</span><span style="color:var(--grey-400)">60%+ elapsed</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:600">Red</span><span style="color:var(--grey-400)">stuck / past due</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:600">⛔ Red</span><span style="color:var(--grey-400)">blocked (manual)</span></div>
+          </div>
         </div>
       </div>
-      <div style="border-left:1px solid var(--grey-100);padding-left:14px">
-        <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">
-          <span style="font-size:9.5px;font-weight:700;background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff;border-radius:3px;padding:0 5px">Complex</span>
-          <span style="font-size:10px;color:var(--grey-400)">7 days</span>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          ${EST_LINEAR_STAGES.map(s=>`<div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-${s.key}" style="font-size:9.5px">${s.short}</span><span style="color:var(--grey-400)">after ${fmtThr(EST_SLA.complex.threshHrs[s.key])}</span></div>`).join('')}
-          <div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-blocked" style="font-size:9.5px">Blocked</span><span style="color:var(--grey-400)">no SLA</span></div>
-        </div>
-      </div>
-      <div style="border-left:1px solid var(--grey-100);padding-left:14px">
-        <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--grey-300);margin-bottom:6px">Age colour</div>
-        <div style="display:flex;flex-direction:column;gap:4px;font-size:10.5px">
-          <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--grey-500);font-weight:600">Grey</span><span style="color:var(--grey-400)">under 60% SLA</span></div>
-          <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--amber);font-weight:600">Amber</span><span style="color:var(--grey-400)">60%+ elapsed</span></div>
-          <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:600">Red</span><span style="color:var(--grey-400)">stuck / past due</span></div>
-          <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:600">⛔ Red</span><span style="color:var(--grey-400)">blocked (manual)</span></div>
-        </div>
-      </div>
-    </div>
+    </div>` : ''}
   </div>`;
 }
 
