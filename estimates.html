@@ -413,6 +413,37 @@ function fmtDM(dateStr) {
 }
 
 // ─────────────────────────────────────────────
+// BUSINESS-TIME HELPERS (Mon–Fri only)
+// ─────────────────────────────────────────────
+function businessHoursBetween(startDate, endDate) {
+  if (endDate <= startDate) return 0;
+  let total = 0;
+  const cur = new Date(startDate.getTime());
+  while (cur < endDate) {
+    const dow = cur.getDay();
+    if (dow >= 1 && dow <= 5) {
+      const endOfDay = new Date(cur);
+      endOfDay.setHours(23, 59, 59, 999);
+      const segEnd = endDate < endOfDay ? endDate : endOfDay;
+      total += (segEnd.getTime() - cur.getTime()) / 3600000;
+    }
+    cur.setDate(cur.getDate() + 1);
+    cur.setHours(0, 0, 0, 0);
+  }
+  return total;
+}
+
+function addBusinessDays(dateStr, numDays) {
+  const d = new Date(dateStr + 'T00:00:00');
+  let added = 0;
+  while (added < numDays) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() >= 1 && d.getDay() <= 5) added++;
+  }
+  return d;
+}
+
+// ─────────────────────────────────────────────
 // STAGE / SLA HELPERS
 // ─────────────────────────────────────────────
 function estStageDef(key)  { return EST_STAGES.find(s => s.key === key) || EST_STAGES[0]; }
@@ -429,14 +460,14 @@ function estSLAThreshHrs(e){ return estSLATier(e).threshHrs[e.stage] ?? 4; }
 
 function estElapsedHrs(e) {
   if (!e.received) return 0;
-  return Math.max(0, (new Date() - new Date(e.received + 'T00:00:00')) / 3600000);
+  return Math.max(0, businessHoursBetween(new Date(e.received + 'T00:00:00'), new Date()));
 }
 function estElapsed(e) { return Math.floor(estElapsedHrs(e) / 24); }
 function estStageAgeHrs(e) {
   const hist = [...(e.stageHistory||[])].reverse().find(h => h.stage === e.stage && (!h.type || h.type === 'stage'));
   const since = hist ? hist.when : e.createdAt;
   if (!since) return 0;
-  return Math.max(0, (new Date() - new Date(since)) / 3600000);
+  return Math.max(0, businessHoursBetween(new Date(since), new Date()));
 }
 function estIsUrgent(e) {
   if (e.done) return false;
@@ -854,9 +885,9 @@ function _estCalcTargetSend() {
   if (!briefEl.value) { outEl.textContent='—'; return; }
   const cx = document.querySelector('input[name="est-f-cx"]:checked')?.value || 'standard';
   const addDays = cx === 'complex' ? 7 : 2;
-  const d = new Date(briefEl.value + 'T00:00:00'); d.setDate(d.getDate() + addDays);
+  const d = addBusinessDays(briefEl.value, addDays);
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  outEl.textContent = `${d.getDate()} ${M[d.getMonth()]} ${d.getFullYear()} (+${addDays} calendar days)`;
+  outEl.textContent = `${d.getDate()} ${M[d.getMonth()]} ${d.getFullYear()} (+${addDays} business days)`;
   outEl.dataset.iso = d.toISOString().slice(0,10);
 }
 function showEstModal() {
@@ -1571,7 +1602,7 @@ function renderEstLegend() {
         <div>
           <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">
             <span style="font-size:9.5px;font-weight:700;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:3px;padding:0 5px">Standard</span>
-            <span style="font-size:10px;color:var(--grey-400)">48 hrs</span>
+            <span style="font-size:10px;color:var(--grey-400)">48 bus. hrs</span>
           </div>
           <div style="display:flex;flex-direction:column;gap:4px">
             ${EST_LINEAR_STAGES.map(s=>`<div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-${s.key}" style="font-size:9.5px">${s.short}</span><span style="color:var(--grey-400)">after ${fmtThr(EST_SLA.standard.threshHrs[s.key])}</span></div>`).join('')}
@@ -1581,7 +1612,7 @@ function renderEstLegend() {
         <div style="border-left:1px solid var(--grey-100);padding-left:14px">
           <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">
             <span style="font-size:9.5px;font-weight:700;background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff;border-radius:3px;padding:0 5px">Complex</span>
-            <span style="font-size:10px;color:var(--grey-400)">7 days</span>
+            <span style="font-size:10px;color:var(--grey-400)">7 bus. days</span>
           </div>
           <div style="display:flex;flex-direction:column;gap:4px">
             ${EST_LINEAR_STAGES.map(s=>`<div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-${s.key}" style="font-size:9.5px">${s.short}</span><span style="color:var(--grey-400)">after ${fmtThr(EST_SLA.complex.threshHrs[s.key])}</span></div>`).join('')}
@@ -1598,6 +1629,7 @@ function renderEstLegend() {
           </div>
         </div>
       </div>
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--grey-100);font-size:10px;color:var(--grey-400);font-style:italic">All thresholds and elapsed time are in business hours (Mon–Fri). Weekends are excluded from SLA clocks.</div>
     </div>` : ''}
   </div>`;
 }
