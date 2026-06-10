@@ -303,7 +303,7 @@ const EST_STAGES = [
 const EST_LINEAR_STAGES = EST_STAGES.filter(s => s.key !== 'blocked');
 
 const EST_SLA = {
-  standard: { totalHrs: 72,  threshHrs: { 'client-req':4, 'cs-brief':8,  'pm-scope':16, 'cs-review':6,  'pm-revs':8,  'cs-sent':4, 'client-review':48, 'blocked':0 } },
+  standard: { totalHrs: 48,  threshHrs: { 'client-req':2, 'cs-brief':4,  'pm-scope':12, 'cs-review':6,  'pm-revs':6,  'cs-sent':2, 'client-review':12, 'blocked':0 } },
   complex:  { totalHrs: 168, threshHrs: { 'client-req':8, 'cs-brief':12, 'pm-scope':48, 'cs-review':16, 'pm-revs':24, 'cs-sent':8, 'client-review':72, 'blocked':0 } },
 };
 
@@ -627,7 +627,7 @@ function renderEstDrawer(e) {
         <div style="padding:6px 0 6px 12px;border-bottom:1px solid var(--grey-100)">
           <div style="font-size:9.5px;color:var(--grey-400);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.04em">Complexity</div>
           <select onchange="updateEstimateField('${e.id}','estimateComplexity',this.value);renderEstimateTracker();const upd=(STATE.estimates||[]).find(x=>x.id==='${e.id}');if(upd)renderEstDrawer(upd)" style="font-size:12.5px;border:none;padding:0;background:transparent;cursor:pointer;font-family:var(--font);color:${(e.estimateComplexity||'standard')==='complex'?'#7e22ce':'#15803d'};font-weight:700">
-            <option value="standard"${(e.estimateComplexity||'standard')==='standard'?' selected':''}>Standard · 72h</option>
+            <option value="standard"${(e.estimateComplexity||'standard')==='standard'?' selected':''}>Standard · 48h</option>
             <option value="complex"${e.estimateComplexity==='complex'?' selected':''}>Complex · 7d</option>
           </select>
         </div>
@@ -853,7 +853,7 @@ function _estCalcTargetSend() {
   if (!briefEl || !outEl) return;
   if (!briefEl.value) { outEl.textContent='—'; return; }
   const cx = document.querySelector('input[name="est-f-cx"]:checked')?.value || 'standard';
-  const addDays = cx === 'complex' ? 7 : 3;
+  const addDays = cx === 'complex' ? 7 : 2;
   const d = new Date(briefEl.value + 'T00:00:00'); d.setDate(d.getDate() + addDays);
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   outEl.textContent = `${d.getDate()} ${M[d.getMonth()]} ${d.getFullYear()} (+${addDays} calendar days)`;
@@ -1148,7 +1148,7 @@ function runExport() {
     firstSentDate(e),
     estElapsed(e),
     estStageAgeDays(e),
-    estSLATotalHrs(e) === 72 ? '72h Standard' : '7d Complex',
+    estSLATotalHrs(e) === 48 ? '48h Standard' : '7d Complex',
     slaMet(e),
     outcomeLabel(e),
     estIsStuck(e) ? 'Yes' : 'No',
@@ -1571,7 +1571,7 @@ function renderEstLegend() {
         <div>
           <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">
             <span style="font-size:9.5px;font-weight:700;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:3px;padding:0 5px">Standard</span>
-            <span style="font-size:10px;color:var(--grey-400)">72 hrs</span>
+            <span style="font-size:10px;color:var(--grey-400)">48 hrs</span>
           </div>
           <div style="display:flex;flex-direction:column;gap:4px">
             ${EST_LINEAR_STAGES.map(s=>`<div style="display:flex;align-items:center;gap:5px"><span class="est-stage-badge est-s-${s.key}" style="font-size:9.5px">${s.short}</span><span style="color:var(--grey-400)">after ${fmtThr(EST_SLA.standard.threshHrs[s.key])}</span></div>`).join('')}
