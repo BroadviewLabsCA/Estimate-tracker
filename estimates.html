@@ -1690,7 +1690,7 @@ async function init() {
   if (el) el.textContent = `${dow[now.getDay()]} ${now.getDate()} ${M[now.getMonth()]}`;
   updateLiveIndicator(_storageConnected);
   renderEstimateTracker();
-  setInterval(silentRefresh, 30000);
+  setInterval(silentRefresh, 10000);
 }
 window.addEventListener('load', checkAuth);
 
