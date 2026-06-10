@@ -221,6 +221,7 @@
     </div>
     <div class="topbar-right">
       <span id="save-indicator"></span>
+      <span id="live-dot" title="Live sync" style="width:7px;height:7px;border-radius:50%;background:#4ade80;flex-shrink:0;display:none"></span>
       <span id="today-date"></span>
       <button id="signout-btn" onclick="doLogout()">Sign out</button>
     </div>
@@ -279,7 +280,9 @@ function doLogout() {
 // ─────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────
-const STORAGE_KEY    = 'bvl-est-v1';
+const STORAGE_KEY    = 'bvl-estimates';
+const PERSONA_KEY    = 'bvl-est-persona';
+const MISC_KEY       = 'bvl-est-misc';
 const LEGEND_KEY     = 'bvl-est-legend';
 const CS_MEMBERS     = ['Bailey','Tyler','Katie'];
 const PM_MEMBERS     = ['Maria','Natacha W.','Michael','Celane'];
@@ -329,45 +332,70 @@ const SEED_ESTIMATES = [
 // STATE
 // ─────────────────────────────────────────────
 let STATE;
-function loadState() {
+let _storageConnected = false;
+
+function _normalizeEstimate(e) {
+  const legacyMap = { brief:'cs-brief', file:'cs-brief', scope:'pm-scope', csrev:'cs-review', sent:'cs-sent' };
+  if (legacyMap[e.stage]) e.stage = legacyMap[e.stage];
+  if (!e.stageHistory)    e.stageHistory    = [];
+  if (e.done      === undefined) e.done      = false;
+  if (e.urgent    === undefined) e.urgent    = false;
+  if (e.rush      === undefined) e.rush      = false;
+  if (!e.owner)           e.owner           = '';
+  if (!e.target)          e.target          = '';
+  if (!e.csOwner)         e.csOwner         = e.owner || '';
+  if (!e.pmOwner)         e.pmOwner         = '';
+  if (!e.estimateType)    e.estimateType    = 'estimate';
+  if (!e.estimateComplexity) e.estimateComplexity = 'standard';
+  if (!e.docUrl)          e.docUrl          = '';
+  if (!e.dueBack)         e.dueBack         = '';
+  if (!e.notes)           e.notes           = '';
+  if (!e.clientContact)   e.clientContact   = '';
+  if (!e.createdAt)       e.createdAt       = new Date().toISOString();
+}
+
+async function loadState() {
+  let estimates;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    STATE = raw ? JSON.parse(raw) : { estimates: SEED_ESTIMATES.map(e=>({...e})), estViewAs:'Maria', webhookUrl:'', escalationNotified:{} };
-    if (!STATE.estimates)          STATE.estimates          = [];
-    if (!STATE.estViewAs)          STATE.estViewAs          = 'Maria';
-    if (!STATE.webhookUrl)         STATE.webhookUrl         = '';
-    if (!STATE.escalationNotified) STATE.escalationNotified = {};
-    STATE.estimates.forEach(e => {
-      const legacyMap = { brief:'cs-brief', file:'cs-brief', scope:'pm-scope', csrev:'cs-review', sent:'cs-sent' };
-      if (legacyMap[e.stage]) e.stage = legacyMap[e.stage];
-      if (!e.stageHistory)    e.stageHistory    = [];
-      if (e.done      === undefined) e.done      = false;
-      if (e.urgent    === undefined) e.urgent    = false;
-      if (e.rush      === undefined) e.rush      = false;
-      if (!e.owner)           e.owner           = '';
-      if (!e.target)          e.target          = '';
-      if (!e.csOwner)         e.csOwner         = e.owner || '';
-      if (!e.pmOwner)         e.pmOwner         = '';
-      if (!e.estimateType)    e.estimateType    = 'estimate';
-      if (!e.estimateComplexity) e.estimateComplexity = 'standard';
-      if (!e.docUrl)          e.docUrl          = '';
-      if (!e.dueBack)         e.dueBack         = '';
-      if (!e.notes)           e.notes           = '';
-      if (!e.clientContact)   e.clientContact   = '';
-      if (!e.createdAt)       e.createdAt       = new Date().toISOString();
-    });
+    const raw = await window.storage.get(STORAGE_KEY, true);
+    estimates = raw ? JSON.parse(raw) : SEED_ESTIMATES.map(e => ({...e}));
+    _storageConnected = true;
   } catch(_) {
-    STATE = { estimates: SEED_ESTIMATES.map(e=>({...e})), estViewAs:'Maria', webhookUrl:'', escalationNotified:{} };
+    estimates = [];
+    _storageConnected = false;
   }
+
+  const persona = localStorage.getItem(PERSONA_KEY) || 'Maria';
+  let misc = {};
+  try { const m = localStorage.getItem(MISC_KEY); if (m) misc = JSON.parse(m); } catch(_) {}
+
+  STATE = {
+    estimates: Array.isArray(estimates) ? estimates : [],
+    estViewAs: persona,
+    webhookUrl: misc.webhookUrl || '',
+    escalationNotified: misc.escalationNotified || {},
+  };
+  STATE.estimates.forEach(_normalizeEstimate);
 }
 
 let _saveTimer;
+let _toastTimer;
 function save() {
+  localStorage.setItem(PERSONA_KEY, STATE.estViewAs || 'Maria');
+  localStorage.setItem(MISC_KEY, JSON.stringify({ webhookUrl: STATE.webhookUrl || '', escalationNotified: STATE.escalationNotified || {} }));
   clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));
-    const ind = document.getElementById('save-indicator');
-    if (ind) { ind.textContent = '✓ Saved'; ind.classList.add('saved'); setTimeout(() => { ind.textContent = ''; ind.classList.remove('saved'); }, 1500); }
+  _saveTimer = setTimeout(async () => {
+    try {
+      await window.storage.set(STORAGE_KEY, JSON.stringify(STATE.estimates), true);
+      _storageConnected = true;
+      updateLiveIndicator(true);
+      const ind = document.getElementById('save-indicator');
+      if (ind) { ind.textContent = '✓ Saved'; ind.classList.add('saved'); setTimeout(() => { ind.textContent = ''; ind.classList.remove('saved'); }, 1500); }
+    } catch(_) {
+      _storageConnected = false;
+      updateLiveIndicator(false);
+      showSyncFailedToast();
+    }
   }, 300);
 }
 
@@ -1575,16 +1603,62 @@ function renderEstLegend() {
 }
 
 // ─────────────────────────────────────────────
+// LIVE INDICATOR & SYNC TOAST
+// ─────────────────────────────────────────────
+function updateLiveIndicator(connected) {
+  const dot = document.getElementById('live-dot');
+  if (dot) dot.style.display = connected ? 'inline-block' : 'none';
+}
+
+function showSyncFailedToast() {
+  let toast = document.getElementById('sync-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'sync-toast';
+    toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#374151;color:#f9fafb;font-size:12px;padding:7px 14px;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.18);z-index:9999;pointer-events:none;transition:opacity 0.25s';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = 'Sync failed — check connection';
+  toast.style.opacity = '1';
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+}
+
+// ─────────────────────────────────────────────
+// AUTO-REFRESH
+// ─────────────────────────────────────────────
+async function silentRefresh() {
+  if (!window.storage) return;
+  if (document.activeElement && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+  try {
+    const raw = await window.storage.get(STORAGE_KEY, true);
+    if (!raw) return;
+    const fresh = JSON.parse(raw);
+    if (!Array.isArray(fresh)) return;
+    STATE.estimates = fresh;
+    STATE.estimates.forEach(_normalizeEstimate);
+    _storageConnected = true;
+    updateLiveIndicator(true);
+    renderEstimateTracker();
+  } catch(_) {
+    _storageConnected = false;
+    updateLiveIndicator(false);
+  }
+}
+
+// ─────────────────────────────────────────────
 // INIT
 // ─────────────────────────────────────────────
-function init() {
-  loadState();
+async function init() {
+  await loadState();
   const now = new Date();
   const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const M   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const el  = document.getElementById('today-date');
   if (el) el.textContent = `${dow[now.getDay()]} ${now.getDate()} ${M[now.getMonth()]}`;
+  updateLiveIndicator(_storageConnected);
   renderEstimateTracker();
+  setInterval(silentRefresh, 30000);
 }
 window.addEventListener('load', checkAuth);
 
