@@ -287,6 +287,7 @@ const AT_BASE  = 'appUikmZsuYKg04SV';
 const AT_TOKEN = 'patRtwtz3LaoZhF1w.ee7ed351946d56b951ee11c8af889d9a6c608d388dda6e3ac07c0e39536e12d8';
 const AT_TABLE = 'Estimates';
 const AT_URL   = `https://api.airtable.com/v0/${AT_BASE}/${encodeURIComponent(AT_TABLE)}`;
+const AT_META  = `https://api.airtable.com/v0/meta/bases/${AT_BASE}`;
 const CS_MEMBERS     = ['Bailey','Tyler','Katie'];
 const PM_MEMBERS     = ['Maria','Natacha W.','Michael','Celane'];
 const PRC_MEMBERS    = ['Judith'];
@@ -363,6 +364,54 @@ async function atRemove(recordId) {
   const res = await fetch(`${AT_URL}/${recordId}`, { method:'DELETE', headers:atHeaders() });
   if (!res.ok) throw new Error(res.status);
   return res.json();
+}
+
+// ── FIELD BOOTSTRAP ───────────────────────────
+const AT_REQUIRED_FIELDS = [
+  { name:'EstID',         type:'singleLineText' },
+  { name:'Job',           type:'singleLineText' },
+  { name:'Brand',         type:'singleLineText' },
+  { name:'ClientContact', type:'singleLineText' },
+  { name:'JobType',       type:'singleLineText' },
+  { name:'Owner',         type:'singleLineText' },
+  { name:'CSOwner',       type:'singleLineText' },
+  { name:'PMAssigned',    type:'singleLineText' },
+  { name:'DocUrl',        type:'singleLineText' },
+  { name:'Notes',         type:'multilineText'  },
+  { name:'StageHistory',  type:'multilineText'  },
+  { name:'Complexity',    type:'singleSelect', options:{ choices:[{name:'Standard'},{name:'Complex'}] }},
+  { name:'EstimateType',  type:'singleSelect', options:{ choices:[{name:'Estimate'},{name:'Change order'},{name:'Hrs incurred'}] }},
+  { name:'Stage',         type:'singleSelect', options:{ choices:[
+    {name:'Client New Job Request'},{name:'CS Brief for Scoping'},{name:'PM Scoping'},
+    {name:'CS Estimate Review'},{name:'PM Revs Required'},{name:'CS Estimate Sent'},
+    {name:'Client Estimate Review'},{name:'Blocked'},
+  ]}},
+  { name:'Rush',      type:'checkbox', options:{ icon:'check', color:'redBright'    }},
+  { name:'Urgent',    type:'checkbox', options:{ icon:'check', color:'yellowBright' }},
+  { name:'Done',      type:'checkbox', options:{ icon:'check', color:'greenBright'  }},
+  { name:'Escalated', type:'checkbox', options:{ icon:'check', color:'orangeBright' }},
+  { name:'BriefDate',  type:'date', options:{ dateFormat:{ name:'iso' }}},
+  { name:'DueBack',    type:'date', options:{ dateFormat:{ name:'iso' }}},
+  { name:'TargetSend', type:'date', options:{ dateFormat:{ name:'iso' }}},
+  { name:'CreatedAt',  type:'date', options:{ dateFormat:{ name:'iso' }}},
+  { name:'UpdatedAt',  type:'date', options:{ dateFormat:{ name:'iso' }}},
+];
+
+async function atEnsureFields() {
+  try {
+    const res = await fetch(`${AT_META}/tables`, { headers: atHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    const table = (data.tables || []).find(t => t.name === AT_TABLE);
+    if (!table) return;
+    const existing = new Set((table.fields || []).map(f => f.name));
+    const missing = AT_REQUIRED_FIELDS.filter(f => !existing.has(f.name));
+    await Promise.all(missing.map(f =>
+      fetch(`${AT_META}/tables/${table.id}/fields`, {
+        method: 'POST', headers: atHeaders(), body: JSON.stringify(f),
+      }).catch(() => {})
+    ));
+  } catch(_) {}
 }
 
 // ── AIRTABLE ↔ APP MAPPING ─────────────────────
@@ -1761,6 +1810,7 @@ async function silentRefresh() {
 // INIT
 // ─────────────────────────────────────────────
 async function init() {
+  await atEnsureFields();
   await loadState();
   const now = new Date();
   const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
