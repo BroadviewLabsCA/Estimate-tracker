@@ -280,10 +280,13 @@ function doLogout() {
 // ─────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────
-const STORAGE_KEY    = 'bvl-estimates';
 const PERSONA_KEY    = 'bvl-est-persona';
 const MISC_KEY       = 'bvl-est-misc';
 const LEGEND_KEY     = 'bvl-est-legend';
+const AT_BASE  = 'appUikmZsuYKg04SV';
+const AT_TOKEN = 'patRtwtz3LaoZhF1w.ee7ed351946d56b951ee11c8af889d9a6c608d388dda6e3ac07c0e39536e12d8';
+const AT_TABLE = 'Estimates';
+const AT_URL   = `https://api.airtable.com/v0/${AT_BASE}/${encodeURIComponent(AT_TABLE)}`;
 const CS_MEMBERS     = ['Bailey','Tyler','Katie'];
 const PM_MEMBERS     = ['Maria','Natacha W.','Michael','Celane'];
 const PRC_MEMBERS    = ['Judith'];
@@ -329,6 +332,85 @@ const SEED_ESTIMATES = [
 ];
 
 // ─────────────────────────────────────────────
+// AIRTABLE API
+// ─────────────────────────────────────────────
+function atHeaders() {
+  return { 'Authorization': `Bearer ${AT_TOKEN}`, 'Content-Type': 'application/json' };
+}
+async function atFetchAll() {
+  let records = [], offset;
+  do {
+    const url = AT_URL + (offset ? `?offset=${encodeURIComponent(offset)}` : '');
+    const res = await fetch(url, { headers: atHeaders() });
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    records = records.concat(data.records || []);
+    offset = data.offset;
+  } while (offset);
+  return records;
+}
+async function atCreate(fields) {
+  const res = await fetch(AT_URL, { method:'POST', headers:atHeaders(), body:JSON.stringify({ fields }) });
+  if (!res.ok) throw new Error(res.status);
+  return res.json();
+}
+async function atPatch(recordId, fields) {
+  const res = await fetch(`${AT_URL}/${recordId}`, { method:'PATCH', headers:atHeaders(), body:JSON.stringify({ fields }) });
+  if (!res.ok) throw new Error(res.status);
+  return res.json();
+}
+async function atRemove(recordId) {
+  const res = await fetch(`${AT_URL}/${recordId}`, { method:'DELETE', headers:atHeaders() });
+  if (!res.ok) throw new Error(res.status);
+  return res.json();
+}
+
+// ── AIRTABLE ↔ APP MAPPING ─────────────────────
+const AT_STAGE_TO_KEY = {
+  'Client New Job Request':'client-req', 'CS Brief for Scoping':'cs-brief',
+  'PM Scoping':'pm-scope', 'CS Estimate Review':'cs-review',
+  'PM Revs Required':'pm-revs', 'CS Estimate Sent':'cs-sent',
+  'Client Estimate Review':'client-review', 'Blocked':'blocked',
+};
+const AT_KEY_TO_STAGE = Object.fromEntries(Object.entries(AT_STAGE_TO_KEY).map(([a,b]) => [b,a]));
+
+function estToAirtable(e) {
+  return {
+    EstID: e.id || '', Job: e.job || '', Brand: e.brand || '',
+    ClientContact: e.clientContact || '', JobType: e.jobType || '',
+    Complexity: e.estimateComplexity === 'complex' ? 'Complex' : 'Standard',
+    EstimateType: e.estimateType === 'changeorder' ? 'Change order' : e.estimateType === 'hrsonly' ? 'Hrs incurred' : 'Estimate',
+    Rush: !!e.rush, Urgent: !!e.urgent, Done: !!e.done,
+    Stage: AT_KEY_TO_STAGE[e.stage] || 'Client New Job Request',
+    Owner: e.owner || '', CSOwner: e.csOwner || '', PMAssigned: e.pmOwner || '',
+    BriefDate: e.received || null, DueBack: e.dueBack || null, TargetSend: e.target || null,
+    Notes: e.notes || '', Escalated: !!estIsStuck(e), DocUrl: e.docUrl || '',
+    StageHistory: JSON.stringify(e.stageHistory || []),
+    CreatedAt: e.createdAt ? e.createdAt.slice(0,10) : new Date().toISOString().slice(0,10),
+    UpdatedAt: new Date().toISOString().slice(0,10),
+  };
+}
+function airtableToEst(rec) {
+  const f = rec.fields;
+  let stageHistory = [];
+  try { stageHistory = JSON.parse(f.StageHistory || '[]'); } catch(_) {}
+  return {
+    _recordId: rec.id,
+    id: f.EstID || rec.id, job: f.Job || '', brand: f.Brand || '',
+    clientContact: f.ClientContact || '', jobType: f.JobType || '',
+    estimateComplexity: f.Complexity === 'Complex' ? 'complex' : 'standard',
+    estimateType: f.EstimateType === 'Change order' ? 'changeorder' : f.EstimateType === 'Hrs incurred' ? 'hrsonly' : 'estimate',
+    rush: !!f.Rush, urgent: !!f.Urgent, done: !!f.Done,
+    stage: AT_STAGE_TO_KEY[f.Stage] || 'client-req',
+    owner: f.Owner || '', csOwner: f.CSOwner || '', pmOwner: f.PMAssigned || '',
+    received: f.BriefDate || '', dueBack: f.DueBack || '', target: f.TargetSend || '',
+    notes: f.Notes || '', docUrl: f.DocUrl || '',
+    teamsLink: '', source: 'airtable', stageHistory,
+    createdAt: f.CreatedAt ? f.CreatedAt + 'T09:00:00.000Z' : new Date().toISOString(),
+  };
+}
+
+// ─────────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────────
 let STATE;
@@ -355,48 +437,46 @@ function _normalizeEstimate(e) {
 }
 
 async function loadState() {
-  let estimates;
-  try {
-    const raw = await window.storage.get(STORAGE_KEY, true);
-    estimates = raw ? JSON.parse(raw) : SEED_ESTIMATES.map(e => ({...e}));
-    _storageConnected = true;
-  } catch(_) {
-    estimates = [];
-    _storageConnected = false;
-  }
-
   const persona = localStorage.getItem(PERSONA_KEY) || 'Maria';
   let misc = {};
   try { const m = localStorage.getItem(MISC_KEY); if (m) misc = JSON.parse(m); } catch(_) {}
-
-  STATE = {
-    estimates: Array.isArray(estimates) ? estimates : [],
-    estViewAs: persona,
-    webhookUrl: misc.webhookUrl || '',
-    escalationNotified: misc.escalationNotified || {},
-  };
-  STATE.estimates.forEach(_normalizeEstimate);
+  STATE = { estimates: [], estViewAs: persona, webhookUrl: misc.webhookUrl || '', escalationNotified: misc.escalationNotified || {} };
+  try {
+    const records = await atFetchAll();
+    STATE.estimates = records.map(airtableToEst);
+    STATE.estimates.forEach(_normalizeEstimate);
+    _storageConnected = true;
+  } catch(_) {
+    _storageConnected = false;
+  }
 }
 
-let _saveTimer;
 let _toastTimer;
 function save() {
   localStorage.setItem(PERSONA_KEY, STATE.estViewAs || 'Maria');
   localStorage.setItem(MISC_KEY, JSON.stringify({ webhookUrl: STATE.webhookUrl || '', escalationNotified: STATE.escalationNotified || {} }));
-  clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(async () => {
-    try {
-      await window.storage.set(STORAGE_KEY, JSON.stringify(STATE.estimates), true);
-      _storageConnected = true;
-      updateLiveIndicator(true);
-      const ind = document.getElementById('save-indicator');
-      if (ind) { ind.textContent = '✓ Saved'; ind.classList.add('saved'); setTimeout(() => { ind.textContent = ''; ind.classList.remove('saved'); }, 1500); }
-    } catch(_) {
-      _storageConnected = false;
-      updateLiveIndicator(false);
-      showSyncFailedToast();
+}
+
+async function atSaveEstimate(id) {
+  const e = (STATE.estimates || []).find(x => x.id === id);
+  if (!e) return;
+  try {
+    const fields = estToAirtable(e);
+    if (e._recordId) {
+      await atPatch(e._recordId, fields);
+    } else {
+      const result = await atCreate(fields);
+      e._recordId = result.id;
     }
-  }, 300);
+    _storageConnected = true;
+    updateLiveIndicator(true);
+    const ind = document.getElementById('save-indicator');
+    if (ind) { ind.textContent = '✓ Saved'; ind.classList.add('saved'); setTimeout(() => { ind.textContent = ''; ind.classList.remove('saved'); }, 1500); }
+  } catch(_) {
+    _storageConnected = false;
+    updateLiveIndicator(false);
+    showSyncFailedToast();
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -509,13 +589,13 @@ function estComplexityBadge(e) {
 function advanceEstStage(id) {
   const e = (STATE.estimates||[]).find(x => x.id === id); if (!e) return;
   if (e.stage === 'blocked') return;
-  if (e.stage === 'client-review') { e.done = !e.done; save(); renderEstimateTracker(); return; }
+  if (e.stage === 'client-review') { e.done = !e.done; save(); atSaveEstimate(id); renderEstimateTracker(); return; }
   const next = estNextStage(e.stage); if (!next) return;
   e.stage = next.key;
   if (next.roleCat === 'PM')      e.owner = (e.pmOwner && PM_MEMBERS.includes(e.pmOwner)) ? e.pmOwner : (PM_MEMBERS[0]||'');
   else if (next.roleCat === 'CS') e.owner = (e.csOwner && CS_MEMBERS.includes(e.csOwner)) ? e.csOwner : (CS_MEMBERS[0]||'');
   (e.stageHistory = e.stageHistory||[]).push({ type:'stage', stage:next.key, who:e.owner, when:new Date().toISOString() });
-  save(); renderEstimateTracker();
+  save(); atSaveEstimate(id); renderEstimateTracker();
   if (_estOpenId === id) { const upd = (STATE.estimates||[]).find(x => x.id===id); if (upd) renderEstDrawer(upd); }
 }
 
@@ -529,18 +609,18 @@ function moveEstToStage(id, stageKey) {
     else if (def.roleCat === 'CS') e.owner = (e.csOwner && CS_MEMBERS.includes(e.csOwner)) ? e.csOwner : (CS_MEMBERS[0]||'');
   }
   (e.stageHistory = e.stageHistory||[]).push({ type:'stage', stage:stageKey, who:e.owner||'', when:new Date().toISOString(), note:'Manual move' });
-  save(); renderEstimateTracker();
+  save(); atSaveEstimate(id); renderEstimateTracker();
   if (_estOpenId === id) { const upd = (STATE.estimates||[]).find(x => x.id===id); if (upd) renderEstDrawer(upd); }
 }
 
 function toggleEstUrgent(id) {
   const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
-  e.urgent = !e.urgent; save(); renderEstimateTracker();
+  e.urgent = !e.urgent; save(); atSaveEstimate(id); renderEstimateTracker();
   if (_estOpenId === id) { const upd = (STATE.estimates||[]).find(x => x.id===id); if (upd) renderEstDrawer(upd); }
 }
 function toggleEstRush(id) {
   const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
-  e.rush = !e.rush; save(); renderEstimateTracker();
+  e.rush = !e.rush; save(); atSaveEstimate(id); renderEstimateTracker();
   if (_estOpenId === id) { const upd = (STATE.estimates||[]).find(x => x.id===id); if (upd) renderEstDrawer(upd); }
 }
 
@@ -786,7 +866,7 @@ function addEstHistoryRow(id) {
   if (!e.stageHistory) e.stageHistory = [];
   const who = STATE.estViewAs && STATE.estViewAs !== '__team__' ? STATE.estViewAs : '';
   e.stageHistory.push({ type:'stage', stage:e.stage, who, when:new Date().toISOString() });
-  save(); renderEstDrawer(e);
+  save(); atSaveEstimate(id); renderEstDrawer(e);
 }
 function editEstHistoryRow(id, idx) {
   _estEditHistIdx = idx;
@@ -806,11 +886,11 @@ function saveEstHistoryRow(id, idx) {
   if (wnEl && wnEl.value) h.when = wnEl.value + ':00.000Z';
   if (ntEl) h.note  = ntEl.value.trim() || undefined;
   _estEditHistIdx = null;
-  save(); renderEstDrawer(e);
+  save(); atSaveEstimate(id); renderEstDrawer(e);
 }
 function deleteEstHistoryRow(id, idx) {
   const e = (STATE.estimates||[]).find(x => x.id===id); if (!e) return;
-  e.stageHistory.splice(idx, 1); save(); renderEstDrawer(e);
+  e.stageHistory.splice(idx, 1); save(); atSaveEstimate(id); renderEstDrawer(e);
 }
 
 // ─────────────────────────────────────────────
@@ -828,11 +908,14 @@ function updateEstimateField(id, field, value) {
   } else if (field === 'owner' && value) {
     (e.stageHistory = e.stageHistory||[]).push({ type:'owner', stage:e.stage, who:value, when:now, note:`Owner → ${value}${prev?' (was '+prev+')':''}` });
   }
-  save();
+  save(); atSaveEstimate(id);
 }
 function deleteEstimate(id) {
-  STATE.estimates = (STATE.estimates||[]).filter(e => e.id !== id);
+  const target = (STATE.estimates||[]).find(x => x.id === id);
+  const recordId = target?._recordId;
+  STATE.estimates = (STATE.estimates||[]).filter(x => x.id !== id);
   save(); renderEstimateTracker();
+  if (recordId) atRemove(recordId).then(() => { _storageConnected=true; updateLiveIndicator(true); }).catch(() => { _storageConnected=false; updateLiveIndicator(false); showSyncFailedToast(); });
 }
 
 // ─────────────────────────────────────────────
@@ -1032,7 +1115,7 @@ function saveNewEstimate() {
   est.stageHistory.push({ type:'stage', stage:'client-req', who:csOwner||'CS', when:new Date(est.received+'T09:00:00').toISOString(), note:'CS brief received' });
   if (!STATE.estimates) STATE.estimates = [];
   STATE.estimates.unshift(est);
-  save(); closeEstModal(); renderEstimateTracker();
+  save(); closeEstModal(); renderEstimateTracker(); atSaveEstimate(est.id);
 }
 
 // ─────────────────────────────────────────────
@@ -1660,14 +1743,10 @@ function showSyncFailedToast() {
 // AUTO-REFRESH
 // ─────────────────────────────────────────────
 async function silentRefresh() {
-  if (!window.storage) return;
   if (document.activeElement && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
   try {
-    const raw = await window.storage.get(STORAGE_KEY, true);
-    if (!raw) return;
-    const fresh = JSON.parse(raw);
-    if (!Array.isArray(fresh)) return;
-    STATE.estimates = fresh;
+    const records = await atFetchAll();
+    STATE.estimates = records.map(airtableToEst);
     STATE.estimates.forEach(_normalizeEstimate);
     _storageConnected = true;
     updateLiveIndicator(true);
