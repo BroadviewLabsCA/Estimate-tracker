@@ -397,21 +397,73 @@ const AT_REQUIRED_FIELDS = [
   { name:'UpdatedAt',  type:'date', options:{ dateFormat:{ name:'iso' }}},
 ];
 
+function showSetupBanner(msg) {
+  let b = document.getElementById('setup-banner');
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'setup-banner';
+    b.style.cssText = 'position:fixed;top:54px;left:0;right:0;z-index:500;background:#fefce8;border-bottom:2px solid #fde047;color:#713f12;font-size:12.5px;padding:8px 16px;display:flex;align-items:flex-start;gap:10px;line-height:1.5';
+    document.body.appendChild(b);
+  }
+  b.innerHTML = `<span style="font-size:15px;flex-shrink:0">⚠</span><span style="flex:1">${msg}</span><button onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;font-size:16px;color:#92400e;flex-shrink:0;line-height:1;padding:0">✕</button>`;
+}
+
 async function atEnsureFields() {
+  console.log('[atEnsureFields] starting — fetching table schema from', `${AT_META}/tables`);
+  let tableRes;
   try {
-    const res = await fetch(`${AT_META}/tables`, { headers: atHeaders() });
-    if (!res.ok) return;
-    const data = await res.json();
-    const table = (data.tables || []).find(t => t.name === AT_TABLE);
-    if (!table) return;
-    const existing = new Set((table.fields || []).map(f => f.name));
-    const missing = AT_REQUIRED_FIELDS.filter(f => !existing.has(f.name));
-    await Promise.all(missing.map(f =>
-      fetch(`${AT_META}/tables/${table.id}/fields`, {
+    tableRes = await fetch(`${AT_META}/tables`, { headers: atHeaders() });
+  } catch(err) {
+    const msg = `atEnsureFields: network error fetching schema — ${err.message}`;
+    console.error('[atEnsureFields]', msg);
+    showSetupBanner(`<b>Airtable schema check failed (network error):</b> ${err.message}`);
+    return;
+  }
+  if (!tableRes.ok) {
+    const body = await tableRes.text();
+    const msg = `atEnsureFields: GET /tables returned ${tableRes.status} — ${body}`;
+    console.error('[atEnsureFields]', msg);
+    showSetupBanner(`<b>Airtable schema check failed (HTTP ${tableRes.status}):</b> ${body}`);
+    return;
+  }
+  const data = await tableRes.json();
+  console.log('[atEnsureFields] tables found:', (data.tables || []).map(t => t.name));
+  const table = (data.tables || []).find(t => t.name === AT_TABLE);
+  if (!table) {
+    const msg = `atEnsureFields: table "${AT_TABLE}" not found in base. Tables present: ${(data.tables||[]).map(t=>t.name).join(', ')}`;
+    console.error('[atEnsureFields]', msg);
+    showSetupBanner(`<b>Airtable table "${AT_TABLE}" not found.</b> Tables in this base: ${(data.tables||[]).map(t=>t.name).join(', ')||'none'}`);
+    return;
+  }
+  console.log('[atEnsureFields] table id:', table.id, '— existing fields:', (table.fields||[]).map(f=>f.name));
+  const existing = new Set((table.fields || []).map(f => f.name));
+  const missing = AT_REQUIRED_FIELDS.filter(f => !existing.has(f.name));
+  if (!missing.length) { console.log('[atEnsureFields] all fields present, nothing to create'); return; }
+  console.log('[atEnsureFields] missing fields to create:', missing.map(f => f.name));
+  const fieldErrors = [];
+  await Promise.all(missing.map(async f => {
+    console.log('[atEnsureFields] creating field:', f.name, `(${f.type})`);
+    try {
+      const r = await fetch(`${AT_META}/tables/${table.id}/fields`, {
         method: 'POST', headers: atHeaders(), body: JSON.stringify(f),
-      }).catch(() => {})
-    ));
-  } catch(_) {}
+      });
+      if (r.ok) {
+        console.log('[atEnsureFields] ✓ created:', f.name);
+      } else {
+        const errBody = await r.text();
+        console.error(`[atEnsureFields] ✗ failed to create "${f.name}" — HTTP ${r.status}:`, errBody);
+        fieldErrors.push(`${f.name} (${r.status}: ${errBody})`);
+      }
+    } catch(err) {
+      console.error(`[atEnsureFields] ✗ network error creating "${f.name}":`, err.message);
+      fieldErrors.push(`${f.name} (network: ${err.message})`);
+    }
+  }));
+  if (fieldErrors.length) {
+    showSetupBanner(`<b>Airtable field creation failed for:</b> ${fieldErrors.join(' · ')}`);
+  } else {
+    console.log('[atEnsureFields] all missing fields created successfully');
+  }
 }
 
 // ── AIRTABLE ↔ APP MAPPING ─────────────────────
